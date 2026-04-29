@@ -1,0 +1,13 @@
+# robots.txt for 창원섬김의교회
+# 검색 엔진 크롤러를 위한 설정
+
+User-agent: *
+Allow: /
+
+# 관리자 페이지나 민감한 경로가 있다면 여기에 Disallow 추가
+# Disallow: /admin/
+# Disallow: /api/
+
+# 사이트맵 위치
+Sitemap: https://seomgim.foryou.me/sitemap.xml
+
