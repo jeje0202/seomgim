@@ -366,25 +366,26 @@ const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-0 md:p-4"
     >
       <div
-        className="bg-white rounded-3xl shadow-2xl relative w-[80vw] h-[80vh] flex flex-col overflow-hidden"
+        className="bg-white md:rounded-3xl shadow-2xl relative w-full h-full md:w-[80vw] md:h-[80vh] flex flex-col overflow-hidden"
       >
         {/* 닫기 버튼 - 고정 위치 (모달 외부) */}
         <button
           onClick={onClose}
-          className="fixed top-[10vh] right-[10vw] w-12 h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-colors z-[10002] shadow-lg"
+          className="fixed top-4 right-4 md:top-[10vh] md:right-[10vw] w-10 h-10 md:w-12 md:h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-colors z-[10002] shadow-lg"
           aria-label="닫기"
         >
-          <X size={24} className="text-white" />
+          <X size={20} className="text-white md:hidden" />
+          <X size={24} className="text-white hidden md:block" />
         </button>
 
         {/* 헤더 영역 - 고정 */}
-        <div className="flex-shrink-0 px-8 pt-8 pb-4 border-b border-slate-200 relative">
-          <h2 className="text-3xl font-bold text-slate-800 mb-4 pr-12">{album.title}</h2>
+        <div className="flex-shrink-0 px-4 md:px-8 pt-6 md:pt-8 pb-4 border-b border-slate-200 relative">
+          <h2 className="text-2xl md:text-3xl font-bold text-slate-800 mb-4 pr-12">{album.title}</h2>
           {album.description && (
-            <p className="text-slate-600 mb-4 pr-12">{album.description}</p>
+            <p className="text-sm md:text-base text-slate-600 mb-4 pr-12">{album.description}</p>
           )}
 
           <div className="flex items-center gap-4 text-sm text-slate-500 mb-2 pr-12">
@@ -404,7 +405,7 @@ const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
         </div>
 
         {/* 스크롤 가능한 본문 영역 */}
-        <div className="flex-1 overflow-y-auto px-8 py-6">
+        <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6">
           {/* 사진 그리드 */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {album.photos.map((photo, index) => (
