@@ -299,14 +299,16 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
                     {post.category_name}
                   </span>
                 </div>
-                {/* 수정/삭제 버튼 - 자유게시판은 수정 불가, 공지사항은 관리자만 */}
+                {/* 수정/삭제 버튼 */}
                 <div className="flex items-center gap-2">
-                  {/* 자유게시판이 아닌 경우에만 수정 버튼 표시 */}
-                  {post.category_code !== 'free' && (
-                    <>
-                      {/* 공지사항은 관리자 이상만 수정 가능 */}
-                      {post.category_code === 'notice' ? (
-                        user && hasRole(user, 'admin', 'super-admin') && (
+                  {(() => {
+                    const isAdmin = user && hasRole(user, 'admin', 'super-admin');
+                    const isAuthor = user && user.name === post.author_name;
+
+                    // 공지사항은 관리자만 수정 가능
+                    if (post.category_code === 'notice') {
+                      if (isAdmin) {
+                        return (
                           <button
                             onClick={() => setShowEditModal(true)}
                             className="p-2 text-slate-600 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors"
@@ -314,18 +316,38 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
                           >
                             <Edit size={18} />
                           </button>
-                        )
-                      ) : (
-                        <button
-                          onClick={() => setShowEditModal(true)}
-                          className="p-2 text-slate-600 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors"
-                          title="수정"
-                        >
-                          <Edit size={18} />
-                        </button>
-                      )}
-                    </>
-                  )}
+                        );
+                      }
+                      return null;
+                    }
+
+                    // 자유게시판은 작성자 본인 또는 관리자만 수정 가능
+                    if (post.category_code === 'free') {
+                      if (isAuthor || isAdmin) {
+                        return (
+                          <button
+                            onClick={() => setShowEditModal(true)}
+                            className="p-2 text-slate-600 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors"
+                            title={isAdmin ? "수정 (관리자)" : "수정"}
+                          >
+                            <Edit size={18} />
+                          </button>
+                        );
+                      }
+                      return null;
+                    }
+
+                    // 그 외 게시판은 기본적으로 수정 버튼 표시
+                    return (
+                      <button
+                        onClick={() => setShowEditModal(true)}
+                        className="p-2 text-slate-600 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors"
+                        title="수정"
+                      >
+                        <Edit size={18} />
+                      </button>
+                    );
+                  })()}
                   {/* 삭제 버튼 - 작성자 본인 또는 관리자만 표시 */}
                   {(() => {
                     // 관리자는 항상 삭제 가능

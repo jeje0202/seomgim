@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Search, Trash2, User, Shield, CheckCircle, XCircle, Lock, KeyRound, UserCheck } from 'lucide-react';
 import { getUsers, updateUser, deleteUser, resetUserPassword, approveUser, User as UserType } from '../services/userApi';
-import { getToken } from '../services/authApi';
+import { getToken, getUserInfo } from '../services/authApi';
 import { useModalBackButton } from '../hooks/useModalBackButton';
 
 interface UserManagementModalProps {
@@ -17,6 +17,9 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
   onClose,
   onUserUpdated
 }) => {
+  // [추가] 현재 로그인한 사용자 정보 조회
+  const currentUser = getUserInfo();
+
   const [users, setUsers] = useState<UserType[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -331,111 +334,164 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((user) => (
-                      <tr key={user.user_id} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="px-4 py-3 text-sm text-slate-700 font-medium">{user.username}</td>
-                        <td className="px-4 py-3 text-sm text-slate-700">{user.name}</td>
-                        <td className="px-4 py-3 text-sm text-slate-700">{user.nickname || '-'}</td>
-                        <td className="px-4 py-3 text-sm">
-                          <span className={`px-2 py-1 rounded text-xs font-semibold ${getRoleColor(user.role)}`}>
-                            {getRoleLabel(user.role)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <button
-                            onClick={() => handleToggleMember(user)}
-                            className={`px-2 py-1 rounded text-xs font-semibold transition-colors ${
-                              user.is_member 
-                                ? 'bg-teal-100 text-teal-700 hover:bg-teal-200' 
-                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                            }`}
-                          >
-                            {user.is_member ? '교인' : '일반'}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {!user.is_approved ? (
-                            <span className="px-2 py-1 rounded text-xs font-semibold bg-rose-100 text-rose-700">
-                              승인대기
+                    {users.map((user) => {
+                      // [추가] 본인 계정 여부 및 최고관리자 권한 변경 제한 조건 계산
+                      const isSelf = currentUser && user.user_id === currentUser.user_id;
+                      const isTargetSuperAdmin = user.role === 'super-admin';
+                      const isCurrentSuperAdmin = currentUser?.role === 'super-admin';
+
+                      return (
+                        <tr key={user.user_id} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="px-4 py-3 text-sm text-slate-700 font-medium">{user.username}</td>
+                          <td className="px-4 py-3 text-sm text-slate-700">{user.name}</td>
+                          <td className="px-4 py-3 text-sm text-slate-700">{user.nickname || '-'}</td>
+                          <td className="px-4 py-3 text-sm">
+                            <span className={`px-2 py-1 rounded text-xs font-semibold ${getRoleColor(user.role)}`}>
+                              {getRoleLabel(user.role)}
                             </span>
-                          ) : (
-                            <span className="px-2 py-1 rounded text-xs font-semibold bg-teal-100 text-teal-700">
-                              승인됨
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <button
-                            onClick={() => handleToggleActive(user)}
-                            className={`flex items-center gap-1 transition-colors ${
-                              user.is_active ? 'text-teal-600 hover:text-teal-700' : 'text-slate-400 hover:text-slate-500'
-                            }`}
-                          >
-                            {user.is_active ? (
-                              <>
-                                <CheckCircle size={16} />
-                                <span className="text-xs">활성</span>
-                              </>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <button
+                              onClick={() => handleToggleMember(user)}
+                              disabled={loading || (isTargetSuperAdmin && !isCurrentSuperAdmin)}
+                              className={`px-2 py-1 rounded text-xs font-semibold transition-colors ${
+                                isTargetSuperAdmin && !isCurrentSuperAdmin
+                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                                  : user.is_member 
+                                    ? 'bg-teal-100 text-teal-700 hover:bg-teal-200' 
+                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                              title={isTargetSuperAdmin && !isCurrentSuperAdmin ? '최고관리자의 정보는 수정할 수 없습니다.' : ''}
+                            >
+                              {user.is_member ? '교인' : '일반'}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            {!user.is_approved ? (
+                              <span className="px-2 py-1 rounded text-xs font-semibold bg-rose-100 text-rose-700">
+                                승인대기
+                              </span>
                             ) : (
-                              <>
-                                <XCircle size={16} />
-                                <span className="text-xs">비활성</span>
-                              </>
+                              <span className="px-2 py-1 rounded text-xs font-semibold bg-teal-100 text-teal-700">
+                                승인됨
+                              </span>
                             )}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-slate-500">
-                          {new Date(user.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-1 flex-wrap">
+                          </td>
+                          <td className="px-4 py-3 text-sm">
                             <button
-                              onClick={() => {
-                                setSelectedUser(user);
-                                setActionType('role');
-                                setNewRole(user.role);
-                              }}
-                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                              title="권한 변경"
+                              onClick={() => handleToggleActive(user)}
+                              disabled={loading || isSelf || (isTargetSuperAdmin && !isCurrentSuperAdmin)}
+                              className={`flex items-center gap-1 transition-colors ${
+                                isSelf || (isTargetSuperAdmin && !isCurrentSuperAdmin)
+                                  ? 'text-slate-300 cursor-not-allowed opacity-60'
+                                  : user.is_active ? 'text-teal-600 hover:text-teal-700' : 'text-slate-400 hover:text-slate-500'
+                              }`}
+                              title={
+                                isSelf 
+                                  ? '본인의 활성 상태는 변경할 수 없습니다.' 
+                                  : isTargetSuperAdmin && !isCurrentSuperAdmin 
+                                    ? '최고관리자의 정보는 수정할 수 없습니다.' 
+                                    : ''
+                              }
                             >
-                              <Shield size={16} />
+                              {user.is_active ? (
+                                <>
+                                  <CheckCircle size={16} />
+                                  <span className="text-xs">활성</span>
+                                </>
+                              ) : (
+                                <>
+                                  <XCircle size={16} />
+                                  <span className="text-xs">비활성</span>
+                                </>
+                              )}
                             </button>
-                            <button
-                              onClick={() => {
-                                setSelectedUser(user);
-                                setActionType('password');
-                                setNewPassword('');
-                              }}
-                              className="p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                              title="비밀번호 초기화"
-                            >
-                              <KeyRound size={16} />
-                            </button>
-                            {!user.is_approved && (
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-500">
+                            {new Date(user.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1 flex-wrap">
                               <button
                                 onClick={() => {
-                                  setUserToApprove(user);
+                                  setSelectedUser(user);
+                                  setActionType('role');
+                                  setNewRole(user.role);
                                 }}
-                                className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors"
-                                title="승인"
+                                disabled={isSelf || (isTargetSuperAdmin && !isCurrentSuperAdmin)}
+                                className={`p-1.5 rounded transition-colors ${
+                                  isSelf || (isTargetSuperAdmin && !isCurrentSuperAdmin)
+                                    ? 'text-slate-300 cursor-not-allowed opacity-60'
+                                    : 'text-blue-600 hover:bg-blue-50'
+                                }`}
+                                title={
+                                  isSelf 
+                                    ? '본인의 권한은 변경할 수 없습니다.' 
+                                    : isTargetSuperAdmin && !isCurrentSuperAdmin 
+                                      ? '최고관리자의 권한은 최고관리자만 변경할 수 있습니다.' 
+                                      : '권한 변경'
+                                }
                               >
-                                <UserCheck size={16} />
+                                <Shield size={16} />
                               </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                setSelectedUser(user);
-                                setActionType('delete');
-                              }}
-                              className="p-1.5 text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                              title="삭제"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                              <button
+                                onClick={() => {
+                                  setSelectedUser(user);
+                                  setActionType('password');
+                                  setNewPassword('');
+                                }}
+                                disabled={isTargetSuperAdmin && !isCurrentSuperAdmin}
+                                className={`p-1.5 rounded transition-colors ${
+                                  isTargetSuperAdmin && !isCurrentSuperAdmin
+                                    ? 'text-slate-300 cursor-not-allowed opacity-60'
+                                    : 'text-purple-600 hover:bg-purple-50'
+                                }`}
+                                title={isTargetSuperAdmin && !isCurrentSuperAdmin ? '최고관리자의 비밀번호는 초기화할 수 없습니다.' : '비밀번호 초기화'}
+                              >
+                                <KeyRound size={16} />
+                              </button>
+                              {!user.is_approved && (
+                                <button
+                                  onClick={() => {
+                                    setUserToApprove(user);
+                                  }}
+                                  disabled={isTargetSuperAdmin && !isCurrentSuperAdmin}
+                                  className={`p-1.5 rounded transition-colors ${
+                                    isTargetSuperAdmin && !isCurrentSuperAdmin
+                                      ? 'text-slate-300 cursor-not-allowed opacity-60'
+                                      : 'text-green-600 hover:bg-green-50'
+                                  }`}
+                                  title="승인"
+                                >
+                                  <UserCheck size={16} />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => {
+                                  setSelectedUser(user);
+                                  setActionType('delete');
+                                }}
+                                disabled={isSelf || (isTargetSuperAdmin && !isCurrentSuperAdmin)}
+                                className={`p-1.5 rounded transition-colors ${
+                                  isSelf || (isTargetSuperAdmin && !isCurrentSuperAdmin)
+                                    ? 'text-slate-300 cursor-not-allowed opacity-60'
+                                    : 'text-rose-600 hover:bg-rose-50'
+                                }`}
+                                title={
+                                  isSelf 
+                                    ? '본인은 삭제할 수 없습니다.' 
+                                    : isTargetSuperAdmin && !isCurrentSuperAdmin 
+                                      ? '최고관리자는 최고관리자만 삭제할 수 있습니다.' 
+                                      : '삭제'
+                                }
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -510,7 +566,10 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   <option value="user">일반회원</option>
                   <option value="manager">담당자</option>
                   <option value="admin">관리자</option>
-                  <option value="super-admin">최고관리자</option>
+                  {/* [수정] 최고관리자(super-admin)만 다른 사용자를 최고관리자로 변경할 수 있도록 옵션 제한 */}
+                  {currentUser?.role === 'super-admin' && (
+                    <option value="super-admin">최고관리자</option>
+                  )}
                 </select>
               </div>
               <div className="flex gap-2">

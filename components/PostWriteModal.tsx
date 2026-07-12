@@ -1,7 +1,7 @@
 // 게시글 작성 모달 컴포넌트
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, GripVertical, RotateCw, Camera, Settings } from 'lucide-react';
+import { X, GripVertical, RotateCw, Camera, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
 import { createPost, BoardCategory, uploadImage, getTags, Tag } from '../services/boardApi';
 import { getUserInfo, hasRole, getCurrentUser } from '../services/authApi';
 import { useModalBackButton } from '../hooks/useModalBackButton';
@@ -299,21 +299,30 @@ const PostWriteModal: React.FC<PostWriteModalProps> = ({
 
     setError('');
 
-    // 미리보기 생성
-    fileArray.forEach((file) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const imageItem: ImageItem = {
-          id: Date.now() + Math.random().toString(36).substr(2, 9),
-          file: file,
-          originalFile: file, // 회전용 원본 파일 저장
-          preview: reader.result as string,
-          description: ''
+    // [수정] 미리보기 생성 (동시 업로드 시 경쟁 상태 방지를 위해 Promise.all 사용)
+    const readPromises = fileArray.map((file) => {
+      return new Promise<ImageItem>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve({
+            id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            file: file,
+            originalFile: file, // 회전용 원본 파일 저장
+            preview: reader.result as string,
+            description: ''
+          });
         };
-        setImageFiles(prev => [...prev, imageItem]);
-      };
-      reader.readAsDataURL(file);
+        reader.readAsDataURL(file);
+      });
     });
+
+    try {
+      const newImageItems = await Promise.all(readPromises);
+      setImageFiles(prev => [...prev, ...newImageItems]);
+    } catch (err) {
+      console.error('이미지 파일 읽기 오류:', err);
+      setError('이미지 파일을 읽는 중 오류가 발생했습니다.');
+    }
   }, []);
 
   // contentEditable 내용을 formData.content에 동기화
@@ -959,27 +968,46 @@ const PostWriteModal: React.FC<PostWriteModalProps> = ({
     }
   };
 
-  // 드래그 앤 드롭으로 이미지 순서 변경 핸들러
+  // [수정] 드래그 시작 시 인덱스 기록
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);
   };
 
+  // [수정] 드래그 오버 시 마우스가 올라간 위치(dragOverIndex)만 기록 (잦은 렌더링에 의한 끊김 방지)
   const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
-    if (draggedIndex === null || draggedIndex === index) return;
-
-    const newImages = [...imageFiles];
-    const draggedImage = newImages[draggedIndex];
-    newImages.splice(draggedIndex, 1);
-    newImages.splice(index, 0, draggedImage);
-
-    setImageFiles(newImages);
-    setDraggedIndex(index);
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
   };
 
+  // [수정] 드래그 끝나는(드롭) 시점에 최종적으로 순서 변경 적용
   const handleDragEnd = () => {
+    if (draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
+      setImageFiles(prev => {
+        const newImages = [...prev];
+        const draggedImage = newImages[draggedIndex];
+        newImages.splice(draggedIndex, 1);
+        newImages.splice(dragOverIndex, 0, draggedImage);
+        return newImages;
+      });
+    }
     setDraggedIndex(null);
     setDragOverIndex(null);
+  };
+
+  // [추가] 순서 변경을 위한 좌우 이동 버튼 핸들러 (모바일 기기 및 웹 접근성 개선)
+  const handleMoveImage = (index: number, direction: 'prev' | 'next') => {
+    const targetIndex = direction === 'prev' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= imageFiles.length) return;
+
+    setImageFiles(prev => {
+      const newImages = [...prev];
+      const temp = newImages[index];
+      newImages[index] = newImages[targetIndex];
+      newImages[targetIndex] = temp;
+      return newImages;
+    });
   };
 
   // 파일 드래그 앤 드롭 핸들러 (파일 업로드 영역용)
@@ -1250,14 +1278,40 @@ const PostWriteModal: React.FC<PostWriteModalProps> = ({
                           onDragStart={() => handleDragStart(index)}
                           onDragOver={(e) => handleDragOver(e, index)}
                           onDragEnd={handleDragEnd}
-                          className="relative group cursor-move"
+                          // [수정] 드래그 오버 피드백 스타일 바인딩
+                          className={`relative group cursor-move rounded-lg transition-all ${
+                            dragOverIndex === index ? 'ring-4 ring-teal-500 ring-offset-2 scale-105 opacity-50' : ''
+                          }`}
                           style={{ width: 'calc(30% - 8px)', minWidth: '120px' }}
                         >
-                          <img
-                            src={imageItem.preview}
-                            alt={`이미지 ${index + 1}`}
-                            className="w-full aspect-square object-cover rounded-lg border border-slate-200"
-                          />
+                          <div className="relative overflow-hidden rounded-lg aspect-square border border-slate-200">
+                            <img
+                              src={imageItem.preview}
+                              alt={`이미지 ${index + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                            {/* [추가] 순서 변경용 좌우 이동 버튼 (모바일 상시노출, 데스크톱 호버노출) */}
+                            {index > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleMoveImage(index, 'prev')}
+                                className="absolute left-1 top-1/2 -translate-y-1/2 p-1 bg-black/60 text-white rounded-full hover:bg-teal-500 md:opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-md"
+                                title="왼쪽으로 이동"
+                              >
+                                <ChevronLeft size={16} />
+                              </button>
+                            )}
+                            {index < imageFiles.length - 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleMoveImage(index, 'next')}
+                                className="absolute right-1 top-1/2 -translate-y-1/2 p-1 bg-black/60 text-white rounded-full hover:bg-teal-500 md:opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-md"
+                                title="오른쪽으로 이동"
+                              >
+                                <ChevronRight size={16} />
+                              </button>
+                            )}
+                          </div>
                           <button
                             type="button"
                             onClick={() => handleRemoveImage(index)}

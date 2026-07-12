@@ -565,6 +565,14 @@ router.put('/users/:id',
         return res.status(404).json({ success: false, message: '사용자를 찾을 수 없습니다.' });
       }
 
+      // [추가] 대상 사용자가 최고관리자(super-admin)인데 요청자가 최고관리자가 아닌 경우 수정 제한
+      if (users[0].role === 'super-admin' && req.user.role !== 'super-admin') {
+        return res.status(403).json({ 
+          success: false, 
+          message: '최고관리자의 정보는 최고관리자만 수정할 수 있습니다.' 
+        });
+      }
+
       // super-admin 권한 변경 제한 (super-admin만 다른 super-admin 권한 변경 가능)
       if (role && role === 'super-admin' && req.user.role !== 'super-admin') {
         return res.status(403).json({ 
