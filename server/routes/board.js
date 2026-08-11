@@ -741,51 +741,57 @@ router.put('/posts/:id',
       }
 
       const { id } = req.params;
-      const { title, content, author_password, is_notice, image_url, tags } = req.body;
+        const { title, content, author_password, is_notice, image_url, tags, category_id } = req.body;
 
-      // [한글 코멘트] 본문 내 붙여넣은 Base64 이미지를 추출하여 서버 디스크 파일에 저장 후 URL 변환
-      const processedContent = await processBase64Images(content);
+        // [한글 코멘트] 본문 내 붙여넣은 Base64 이미지를 추출하여 서버 디스크 파일에 저장 후 URL 변환
+        const processedContent = await processBase64Images(content);
 
-      const pool = getPool();
-      
-      // 트랜잭션 시작
-      const connection = await pool.getConnection();
-      await connection.beginTransaction();
-      
-      try {
-        // 게시글 조회 (카테고리 정보 포함)
-        const [posts] = await connection.query(`
-          SELECT p.author_password, c.category_code
-          FROM board_posts p
-          JOIN board_categories c ON p.category_id = c.category_id
-          WHERE p.post_id = ? AND p.is_deleted = FALSE
-        `, [id]);
-
-        if (posts.length === 0) {
-          await connection.rollback();
-          return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
-        }
-
-        // 비밀번호 확인
-        const isPasswordValid = await bcrypt.compare(author_password, posts[0].author_password);
-        if (!isPasswordValid) {
-          await connection.rollback();
-          return res.status(401).json({ success: false, message: '비밀번호가 일치하지 않습니다.' });
-        }
-
-        // 게시글 수정 (image_url과 is_notice도 업데이트)
-        const updateFields = ['title = ?', 'content = ?'];
-        const updateValues = [title, processedContent];
+        const pool = getPool();
         
-        if (image_url !== undefined) {
-          updateFields.push('image_url = ?');
-          updateValues.push(image_url || null);
-        }
+        // 트랜잭션 시작
+        const connection = await pool.getConnection();
+        await connection.beginTransaction();
         
-        if (is_notice !== undefined) {
-          updateFields.push('is_notice = ?');
-          updateValues.push(is_notice);
-        }
+        try {
+          // 게시글 조회 (카테고리 정보 포함)
+          const [posts] = await connection.query(`
+            SELECT p.author_password, c.category_code
+            FROM board_posts p
+            JOIN board_categories c ON p.category_id = c.category_id
+            WHERE p.post_id = ? AND p.is_deleted = FALSE
+          `, [id]);
+
+          if (posts.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
+          }
+
+          // 비밀번호 확인
+          const isPasswordValid = await bcrypt.compare(author_password, posts[0].author_password);
+          if (!isPasswordValid) {
+            await connection.rollback();
+            return res.status(401).json({ success: false, message: '비밀번호가 일치하지 않습니다.' });
+          }
+
+          // 게시글 수정 (image_url, is_notice, category_id 업데이트 지원)
+          const updateFields = ['title = ?', 'content = ?'];
+          const updateValues = [title, processedContent];
+          
+          if (image_url !== undefined) {
+            updateFields.push('image_url = ?');
+            updateValues.push(image_url || null);
+          }
+          
+          if (is_notice !== undefined) {
+            updateFields.push('is_notice = ?');
+            updateValues.push(is_notice);
+          }
+
+          // [한글 코멘트] 게시글 이동을 위한 category_id 변경 지원
+          if (category_id !== undefined) {
+            updateFields.push('category_id = ?');
+            updateValues.push(category_id);
+          }
         
         updateValues.push(id);
         
