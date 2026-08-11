@@ -935,9 +935,12 @@ router.delete('/posts/:id',
               
               if (filePath && fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
-                console.log(`[게시글 삭제] ✅ 이미지 파일 삭제 성공: ${filePath}`);
-              } else if (filePath) {
-                console.warn(`[게시글 삭제] ⚠️ 이미지 파일을 찾을 수 없습니다: ${filePath}`);
+                console.log(`[게시글 삭제] ✅ 로컬 이미지 파일 삭제 성공: ${filePath}`);
+              }
+              // [한글 코멘트] R2 클라우드 스토리지 객체 삭제
+              if (imageUrl) {
+                const { deleteFromR2 } = require('../utils/r2Storage');
+                deleteFromR2(imageUrl).catch(err => console.error('[게시글 삭제] R2 삭제 오류:', err));
               }
             } catch (fileError) {
               console.error(`[게시글 삭제] ❌ 이미지 파일 삭제 실패: ${imageUrl}`, fileError);

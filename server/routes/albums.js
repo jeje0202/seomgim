@@ -11,6 +11,7 @@ const fs = require('fs');
 // 파일 저장 유틸리티 import
 const { getAlbumStoragePath, getThumbnailStoragePath, getAlbumImageUrl, getThumbnailUrl } = require('../utils/fileStorage');
 const { getAlbumFilePathFromUrl, getThumbnailFilePathFromUrl } = require('../utils/filePathHelper');
+const { uploadToR2, deleteFromR2 } = require('../utils/r2Storage');
 
 // data/album 디렉토리 생성 (없는 경우)
 const albumDir = path.join(__dirname, '../../data/album');
@@ -292,29 +293,31 @@ router.put('/:id',
       const deletedPhotos = existingPhotos.filter(ep => !newPhotoUrls.includes(ep.photo_url));
 
       deletedPhotos.forEach(photo => {
-        // 원본 이미지 삭제 (URL에서 실제 경로 추출)
+        // 원본 이미지 삭제 (로컬 디스크 및 R2 클라우드 동시 삭제)
         try {
           const filePath = getAlbumFilePathFromUrl(photo.photo_url);
           if (filePath && fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
             console.log(`원본 파일 삭제 성공: ${filePath}`);
-          } else if (filePath) {
-            console.warn(`원본 파일을 찾을 수 없습니다: ${filePath}`);
+          }
+          // [한글 코멘트] R2 클라우드 스토리지 객체 삭제
+          if (photo.photo_url) {
+            deleteFromR2(photo.photo_url).catch(err => console.error('R2 원본 삭제 오류:', err));
           }
         } catch (fileError) {
           console.error(`원본 파일 삭제 실패: ${photo.photo_url}`, fileError);
         }
 
-        // 썸네일 이미지 삭제 (URL에서 실제 경로 추출)
+        // 썸네일 이미지 삭제 (로컬 디스크 및 R2 클라우드 동시 삭제)
         if (photo.thumbnail_url) {
           try {
             const thumbnailPath = getThumbnailFilePathFromUrl(photo.thumbnail_url);
             if (thumbnailPath && fs.existsSync(thumbnailPath)) {
               fs.unlinkSync(thumbnailPath);
               console.log(`썸네일 파일 삭제 성공: ${thumbnailPath}`);
-            } else if (thumbnailPath) {
-              console.warn(`썸네일 파일을 찾을 수 없습니다: ${thumbnailPath}`);
             }
+            // [한글 코멘트] R2 클라우드 스토리지 썸네일 객체 삭제
+            deleteFromR2(photo.thumbnail_url).catch(err => console.error('R2 썸네일 삭제 오류:', err));
           } catch (fileError) {
             console.error(`썸네일 파일 삭제 실패: ${photo.thumbnail_url}`, fileError);
           }
@@ -376,29 +379,29 @@ router.delete('/:id',
       // 물리적 파일 삭제 (원본과 썸네일 모두)
       if (photos.length > 0) {
         photos.forEach(photo => {
-          // 원본 이미지 삭제 (URL에서 실제 경로 추출)
+          // 원본 이미지 삭제 (로컬 디스크 및 R2 클라우드 동시 삭제)
           try {
             const filePath = getAlbumFilePathFromUrl(photo.photo_url);
             if (filePath && fs.existsSync(filePath)) {
               fs.unlinkSync(filePath);
               console.log(`원본 파일 삭제 성공: ${filePath}`);
-            } else if (filePath) {
-              console.warn(`원본 파일을 찾을 수 없습니다: ${filePath}`);
+            }
+            if (photo.photo_url) {
+              deleteFromR2(photo.photo_url).catch(err => console.error('R2 원본 삭제 오류:', err));
             }
           } catch (fileError) {
             console.error(`원본 파일 삭제 실패: ${photo.photo_url}`, fileError);
           }
 
-          // 썸네일 이미지 삭제 (URL에서 실제 경로 추출)
+          // 썸네일 이미지 삭제 (로컬 디스크 및 R2 클라우드 동시 삭제)
           if (photo.thumbnail_url) {
             try {
               const thumbnailPath = getThumbnailFilePathFromUrl(photo.thumbnail_url);
               if (thumbnailPath && fs.existsSync(thumbnailPath)) {
                 fs.unlinkSync(thumbnailPath);
                 console.log(`썸네일 파일 삭제 성공: ${thumbnailPath}`);
-              } else if (thumbnailPath) {
-                console.warn(`썸네일 파일을 찾을 수 없습니다: ${thumbnailPath}`);
               }
+              deleteFromR2(photo.thumbnail_url).catch(err => console.error('R2 썸네일 삭제 오류:', err));
             } catch (fileError) {
               console.error(`썸네일 파일 삭제 실패: ${photo.thumbnail_url}`, fileError);
             }
