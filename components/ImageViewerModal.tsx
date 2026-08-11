@@ -362,37 +362,44 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
         )}
       </div>
 
-      {/* [한글 코멘트] 하단 카카오톡 스타일 주보 페이지 썸네일 바 & 조율 컨트롤 */}
-      <div className="w-full bg-slate-900/90 backdrop-blur-md px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 z-[10003] border-t border-slate-800 shrink-0">
-        {/* 주보 면 썸네일 바 (다중 이미지인 경우) */}
-        {images.length > 1 ? (
-          <div className="flex items-center gap-2 overflow-x-auto max-w-full py-1 scrollbar-thin">
-            {images.map((img, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setCurrentIndex(idx)}
-                className={`relative w-12 h-14 sm:w-14 sm:h-16 rounded-lg overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
-                  currentIndex === idx
-                    ? 'border-teal-400 ring-2 ring-teal-400/50 scale-105 opacity-100'
-                    : 'border-slate-700 opacity-50 hover:opacity-100'
-                }`}
-              >
-                <img src={img} alt={`미니 ${idx + 1}`} className="w-full h-full object-cover" />
-                <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[10px] text-white font-bold text-center py-0.5">
-                  {idx + 1}면
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="text-xs text-slate-400 font-medium">
-            마우스 휠/더블클릭 또는 손가락으로 자유롭게 확대/축소하실 수 있습니다.
-          </div>
-        )}
+      {/* [한글 코멘트] 하단 카카오톡 스타일 주보 페이지 썸네일 바 (중앙 정렬) & 우측 조율 컨트롤 */}
+      <div className="w-full bg-slate-900/90 backdrop-blur-md px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 z-[10003] border-t border-slate-800 shrink-0">
+        {/* 좌측 영역 (대칭 밸런스용) */}
+        <div className="hidden lg:flex items-center text-xs text-slate-400 font-medium w-48">
+          {images.length > 1 ? `총 ${images.length}면의 주보가 있습니다.` : ''}
+        </div>
+
+        {/* [한글 코멘트] 중앙 정렬된 주보 면 썸네일 바 */}
+        <div className="flex-1 flex justify-center max-w-full">
+          {images.length > 1 ? (
+            <div className="flex items-center justify-center gap-2 overflow-x-auto max-w-full py-1 scrollbar-thin">
+              {images.map((img, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setCurrentIndex(idx)}
+                  className={`relative w-12 h-14 sm:w-14 sm:h-16 rounded-lg overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
+                    currentIndex === idx
+                      ? 'border-teal-400 ring-2 ring-teal-400/50 scale-105 opacity-100 shadow-lg'
+                      : 'border-slate-700 opacity-50 hover:opacity-100'
+                  }`}
+                >
+                  <img src={img} alt={`미니 ${idx + 1}`} className="w-full h-full object-cover" />
+                  <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[10px] text-white font-bold text-center py-0.5">
+                    {idx + 1}면
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs text-slate-400 font-medium text-center">
+              마우스 휠/더블클릭 또는 손가락으로 자유롭게 확대/축소하실 수 있습니다.
+            </div>
+          )}
+        </div>
 
         {/* 우측 확대/축소/리셋 컨트롤 바 */}
-        <div className="flex items-center gap-2 bg-slate-800/80 px-3.5 py-1.5 rounded-full border border-slate-700 shrink-0">
+        <div className="flex items-center gap-2 bg-slate-800/80 px-3.5 py-1.5 rounded-full border border-slate-700 shrink-0 sm:w-48 sm:justify-end">
           <button
             type="button"
             onClick={handleZoomIn}
