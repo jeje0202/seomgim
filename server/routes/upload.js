@@ -155,6 +155,23 @@ router.post('/image',
       const thumbnailStoragePath = req.thumbnailStoragePath || getThumbnailStoragePath();
       const thumbnailUrl = thumbnailFile ? getThumbnailUrl(thumbnailFile.filename, thumbnailStoragePath) : null;
 
+      // [한글 코멘트] R2 클라우드 스토리지 자동 동기화 업로드
+      const { uploadToR2 } = require('../utils/r2Storage');
+      (async () => {
+        try {
+          if (imageFile && imageFile.path) {
+            const r2Key = `uploads/${imageUrl.replace(/^\/uploads\//, '')}`;
+            await uploadToR2(imageFile.path, r2Key);
+          }
+          if (thumbnailFile && thumbnailFile.path && thumbnailUrl) {
+            const thumbR2Key = `uploads/${thumbnailUrl.replace(/^\/uploads\//, '')}`;
+            await uploadToR2(thumbnailFile.path, thumbR2Key);
+          }
+        } catch (r2Err) {
+          console.error('⚠️ R2 이미지 업로드 오류:', r2Err.message);
+        }
+      })();
+
       res.json({
         success: true,
         data: {

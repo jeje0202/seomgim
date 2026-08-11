@@ -59,6 +59,15 @@ const processBase64Images = async (htmlContent) => {
 
       await fs.promises.writeFile(filePath, buffer);
 
+      // [한글 코멘트] R2 클라우드 스토리지 동기화 업로드
+      const { uploadToR2 } = require('../utils/r2Storage');
+      try {
+        const r2Key = `uploads/board/pasted/${fileName}`;
+        await uploadToR2(buffer, r2Key);
+      } catch (r2Err) {
+        console.error('⚠️ 붙여넣기 이미지 R2 업로드 오류:', r2Err.message);
+      }
+
       const fileUrl = `/uploads/board/pasted/${fileName}`;
       processedContent = processedContent.replace(fullDataUri, fileUrl);
     } catch (err) {

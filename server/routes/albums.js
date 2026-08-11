@@ -175,6 +175,28 @@ router.post('/upload',
 
       console.log(`[사진 업로드] ${uploadedPhotos.length}개 이미지 업로드 완료 (1080p + 썸네일)`);
 
+      // [한글 코멘트] R2 클라우드 스토리지 동기화 업로드
+      const { uploadToR2 } = require('../utils/r2Storage');
+      (async () => {
+        for (let i = 0; i < fullImages.length; i++) {
+          const f = fullImages[i];
+          const item = uploadedPhotos[i];
+          try {
+            if (f && f.path && item.url) {
+              const r2Key = `uploads/${item.url.replace(/^\/uploads\//, '')}`;
+              await uploadToR2(f.path, r2Key);
+            }
+            const thumbFile = thumbnails[i];
+            if (thumbFile && thumbFile.path && item.thumbnailUrl) {
+              const thumbR2Key = `uploads/${item.thumbnailUrl.replace(/^\/uploads\//, '')}`;
+              await uploadToR2(thumbFile.path, thumbR2Key);
+            }
+          } catch (r2Err) {
+            console.error('⚠️ 앨범 사진 R2 업로드 오류:', r2Err.message);
+          }
+        }
+      })();
+
       res.json({
         success: true,
         data: {

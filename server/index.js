@@ -182,6 +182,27 @@ if (fs.existsSync(dataDir)) {
   }
 }
 
+// [한글 코멘트] R2 클라우드 폴백 미들웨어: 로컬 디스크에 파일이 없거나 향후 로컬 파일 삭제 후에도 Cloudflare R2에서 즉시 내려 받아 서빙
+const { getObjectFromR2, getMimeType } = require('./utils/r2Storage');
+app.use('/uploads/*', async (req, res, next) => {
+  try {
+    const relativePath = req.params[0];
+    if (relativePath) {
+      const r2Key = `uploads/${relativePath}`;
+      const buffer = await getObjectFromR2(r2Key);
+      if (buffer) {
+        const mimeType = getMimeType(relativePath);
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.send(buffer);
+      }
+    }
+  } catch (err) {
+    console.error('R2 클라우드 미들웨어 서빙 예외:', err.message);
+  }
+  next();
+});
+
 // 요청 로깅 미들웨어
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
