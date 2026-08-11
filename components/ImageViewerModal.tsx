@@ -1,7 +1,7 @@
-// 이미지 뷰어 모달 컴포넌트
+// 카카오톡 스타일 이미지 뷰어 모달 컴포넌트
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCw, Download, FileText } from 'lucide-react';
 import { useModalBackButton } from '../hooks/useModalBackButton';
 
 interface ImageViewerModalProps {
@@ -9,13 +9,15 @@ interface ImageViewerModalProps {
   onClose: () => void;
   images: string[]; // 이미지 URL 배열
   initialIndex?: number; // 초기 표시할 이미지 인덱스
+  title?: string; // 카카오톡 스타일 헤더 제목 (선택)
 }
 
 const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   isOpen,
   onClose,
   images,
-  initialIndex = 0
+  initialIndex = 0,
+  title = '주보 및 이미지 크게보기'
 }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [scale, setScale] = useState(1); // 확대/축소 배율
@@ -28,6 +30,7 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   // 모바일 터치 스와이프를 위한 상태
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(null);
+  const [lastTap, setLastTap] = useState<number>(0);
   
   // 모바일 환경 감지 (768px 미만)
   const [isMobile, setIsMobile] = useState(false);
@@ -60,10 +63,41 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     setPosition({ x: 0, y: 0 });
   }, [currentIndex]);
 
+  // [한글 코멘트] 카카오톡 스타일 더블클릭/더블터치 2.5배 확대 토글 함수
+  const handleDoubleClick = () => {
+    if (scale > 1) {
+      setScale(1);
+      setPosition({ x: 0, y: 0 });
+    } else {
+      setScale(2.5);
+    }
+  };
+
+  // [한글 코멘트] 이미지 다운로드 처리 함수
+  const handleDownload = async () => {
+    if (!images[currentIndex]) return;
+    const imgUrl = images[currentIndex];
+    try {
+      const response = await fetch(imgUrl);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      const ext = imgUrl.split('.').pop()?.split('?')[0] || 'jpg';
+      a.download = `주보_이미지_${currentIndex + 1}면.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      window.open(imgUrl, '_blank');
+    }
+  };
+
   // 마우스 휠로 확대/축소
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
     const newScale = Math.max(0.5, Math.min(5, scale + delta));
     setScale(newScale);
   };
@@ -118,7 +152,6 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
   // 이전 이미지
   const handlePrev = () => {
-    // 모바일 환경에서 첫 번째 이미지일 때는 모달 닫기
     if (isMobile && currentIndex === 0) {
       onClose();
       return;
@@ -131,9 +164,16 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     setCurrentIndex(prev => (prev < images.length - 1 ? prev + 1 : 0));
   };
 
-  // 모바일 터치 시작
+  // 모바일 터치 시작 (더블터치 감지 포함)
   const handleTouchStart = (e: React.TouchEvent) => {
-    // 확대 상태가 아닐 때만 스와이프 감지
+    const now = Date.now();
+    if (now - lastTap < 300) {
+      handleDoubleClick();
+      setLastTap(0);
+      return;
+    }
+    setLastTap(now);
+
     if (scale <= 1) {
       const touch = e.touches[0];
       setTouchStart({ x: touch.clientX, y: touch.clientY });
@@ -143,29 +183,24 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
   // 모바일 터치 이동
   const handleTouchMove = (e: React.TouchEvent) => {
-    // 확대 상태가 아닐 때만 스와이프 감지
     if (scale <= 1) {
       const touch = e.touches[0];
       setTouchEnd({ x: touch.clientX, y: touch.clientY });
     }
   };
 
-  // 모바일 터치 종료 - 스와이프 감지 및 이미지 변경
+  // 모바일 터치 종료 - 스와이프 감지
   const handleTouchEnd = () => {
     if (!touchStart || !touchEnd || scale > 1) return;
 
     const distanceX = touchStart.x - touchEnd.x;
     const distanceY = touchStart.y - touchEnd.y;
-    const minSwipeDistance = 50; // 최소 스와이프 거리 (50px)
+    const minSwipeDistance = 50;
 
-    // 좌우 스와이프만 감지 (상하 스와이프는 무시)
     if (Math.abs(distanceX) > Math.abs(distanceY) && Math.abs(distanceX) > minSwipeDistance) {
       if (distanceX > 0) {
-        // 왼쪽으로 스와이프 (다음 이미지)
         handleNext();
       } else {
-        // 오른쪽으로 스와이프 (이전 이미지)
-        // 모바일에서 첫 번째 이미지일 때는 모달 닫기
         if (isMobile && currentIndex === 0) {
           onClose();
         } else {
@@ -208,7 +243,7 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/95 flex items-center justify-center z-[10001]"
+      className="fixed inset-0 bg-black/95 flex flex-col justify-between z-[10001] select-none"
       style={{
         position: 'fixed',
         top: 0,
@@ -223,128 +258,170 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
-      onClick={(e) => {
-        // 배경 클릭 시 닫기 (이미지 클릭은 제외)
-        if (e.target === e.currentTarget) {
-          onClose();
-        }
-      }}
     >
-      {/* 닫기 버튼 - 빨간색 배경으로 시인성 개선 */}
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 z-[10002] w-10 h-10 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-colors shadow-lg"
-        aria-label="닫기"
-      >
-        <X size={24} className="text-white" />
-      </button>
+      {/* [한글 코멘트] 카카오톡 스타일 상단 헤더 바 (제목, 페이지 카운터, 다운로드, 닫기 버튼) */}
+      <div className="w-full bg-slate-900/90 backdrop-blur-md text-white px-4 py-3 flex items-center justify-between z-[10003] border-b border-slate-800 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full bg-rose-600 hover:bg-rose-700 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            title="닫기 (ESC)"
+          >
+            <X size={20} className="text-white" />
+          </button>
+          <div className="min-w-0">
+            <h3 className="font-bold text-sm sm:text-base text-white truncate flex items-center gap-1.5">
+              <FileText size={16} className="text-teal-400 shrink-0" />
+              <span>{title}</span>
+            </h3>
+            <p className="text-xs text-slate-400">
+              {currentIndex + 1} / {images.length} 면 (더블클릭/더블터치 시 2.5배 확대)
+            </p>
+          </div>
+        </div>
 
-      {/* 이미지 컨테이너 */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* 카카오톡 스타일 원본 다운로드 버튼 */}
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-500 text-white px-3.5 py-1.5 rounded-full text-xs font-bold transition-all shadow-md cursor-pointer"
+            title="원본 파일 다운로드"
+          >
+            <Download size={14} />
+            <span className="hidden sm:inline">다운로드</span>
+          </button>
+
+          {/* 닫기 텍스트 버튼 */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="hidden sm:flex items-center px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full text-xs font-medium transition-colors cursor-pointer"
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+
+      {/* 중앙 이미지 화면 영역 */}
       <div
         ref={containerRef}
-        className="relative w-full h-full flex items-center justify-center p-4"
+        className="relative flex-1 w-full flex items-center justify-center p-2 sm:p-4 overflow-hidden"
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            onClose();
+          }
+        }}
       >
-        {/* 이전 버튼 (이미지가 2개 이상일 때) - 모바일에서 숨김 */}
+        {/* 이전 버튼 */}
         {images.length > 1 && (
           <button
+            type="button"
             onClick={handlePrev}
-            className="hidden md:flex absolute left-4 z-[10002] w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 items-center justify-center transition-colors backdrop-blur-sm"
-            aria-label="이전 이미지"
+            className="absolute left-3 sm:left-6 z-[10002] w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/60 hover:bg-teal-600 text-white flex items-center justify-center transition-all shadow-xl backdrop-blur-md cursor-pointer border border-white/20"
+            aria-label="이전 면"
           >
-            <ChevronLeft size={24} className="text-white" />
+            <ChevronLeft size={28} />
           </button>
         )}
 
-        {/* 이미지 */}
+        {/* 이미지 (더블클릭/더블터치 시 확대) */}
         <div
-          className="relative max-w-full max-h-full overflow-hidden"
+          onDoubleClick={handleDoubleClick}
+          className="relative max-w-full max-h-full flex items-center justify-center"
           style={{
             transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
-            transition: isDragging ? 'none' : 'transform 0.1s ease-out',
-            cursor: scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
+            transition: isDragging ? 'none' : 'transform 0.15s cubic-bezier(0.2, 0, 0.2, 1)',
+            cursor: scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'zoom-in'
           }}
         >
           <img
             ref={imageRef}
-            src={currentImage.startsWith('http') ? currentImage : currentImage}
-            alt={`이미지 ${currentIndex + 1}`}
-            className="max-w-full max-h-[90vh] object-contain"
+            src={currentImage}
+            alt={`주보 ${currentIndex + 1}면`}
+            className="max-w-full max-h-[80vh] sm:max-h-[83vh] object-contain rounded-md shadow-2xl"
             draggable={false}
-            onError={(e) => {
-              console.error('이미지 로드 실패:', currentImage);
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
           />
         </div>
 
-        {/* 다음 버튼 (이미지가 2개 이상일 때) - 모바일에서 숨김 */}
+        {/* 다음 버튼 */}
         {images.length > 1 && (
           <button
+            type="button"
             onClick={handleNext}
-            className="hidden md:flex absolute right-4 z-[10002] w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 items-center justify-center transition-colors backdrop-blur-sm"
-            aria-label="다음 이미지"
+            className="absolute right-3 sm:right-6 z-[10002] w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/60 hover:bg-teal-600 text-white flex items-center justify-center transition-all shadow-xl backdrop-blur-md cursor-pointer border border-white/20"
+            aria-label="다음 면"
           >
-            <ChevronRight size={24} className="text-white" />
+            <ChevronRight size={28} />
           </button>
         )}
       </div>
 
-      {/* 하단 컨트롤 바 */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[10002] flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2">
-        {/* 이미지 카운터 */}
-        {images.length > 1 && (
-          <span className="text-white text-sm font-medium px-2">
-            {currentIndex + 1} / {images.length}
-          </span>
+      {/* [한글 코멘트] 하단 카카오톡 스타일 주보 페이지 썸네일 바 & 조율 컨트롤 */}
+      <div className="w-full bg-slate-900/90 backdrop-blur-md px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 z-[10003] border-t border-slate-800 shrink-0">
+        {/* 주보 면 썸네일 바 (다중 이미지인 경우) */}
+        {images.length > 1 ? (
+          <div className="flex items-center gap-2 overflow-x-auto max-w-full py-1 scrollbar-thin">
+            {images.map((img, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setCurrentIndex(idx)}
+                className={`relative w-12 h-14 sm:w-14 sm:h-16 rounded-lg overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
+                  currentIndex === idx
+                    ? 'border-teal-400 ring-2 ring-teal-400/50 scale-105 opacity-100'
+                    : 'border-slate-700 opacity-50 hover:opacity-100'
+                }`}
+              >
+                <img src={img} alt={`미니 ${idx + 1}`} className="w-full h-full object-cover" />
+                <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[10px] text-white font-bold text-center py-0.5">
+                  {idx + 1}면
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-slate-400 font-medium">
+            마우스 휠/더블클릭 또는 손가락으로 자유롭게 확대/축소하실 수 있습니다.
+          </div>
         )}
 
-        {/* 확대 버튼 */}
-        <button
-          onClick={handleZoomIn}
-          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-          aria-label="확대"
-          disabled={scale >= 5}
-        >
-          <ZoomIn size={16} className="text-white" />
-        </button>
-
-        {/* 축소 버튼 */}
-        <button
-          onClick={handleZoomOut}
-          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-          aria-label="축소"
-          disabled={scale <= 0.5}
-        >
-          <ZoomOut size={16} className="text-white" />
-        </button>
-
-        {/* 리셋 버튼 */}
-        <button
-          onClick={handleReset}
-          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-          aria-label="리셋"
-          disabled={scale === 1 && position.x === 0 && position.y === 0}
-        >
-          <RotateCw size={16} className="text-white" />
-        </button>
-
-        {/* 확대 배율 표시 */}
-        <span className="text-white text-sm font-medium px-2">
-          {Math.round(scale * 100)}%
-        </span>
-      </div>
-
-      {/* 키보드 단축키 안내 (처음 3초만 표시) */}
-      <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[10002] bg-white/10 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-xs opacity-70">
-        <div className="flex items-center gap-4">
-          <span>← → : 이전/다음</span>
-          <span>+ - : 확대/축소</span>
-          <span>0 : 리셋</span>
-          <span>ESC : 닫기</span>
+        {/* 우측 확대/축소/리셋 컨트롤 바 */}
+        <div className="flex items-center gap-2 bg-slate-800/80 px-3.5 py-1.5 rounded-full border border-slate-700 shrink-0">
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            className="p-1.5 rounded-full hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer"
+            title="확대 (+)"
+            disabled={scale >= 5}
+          >
+            <ZoomIn size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            className="p-1.5 rounded-full hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer"
+            title="축소 (-)"
+            disabled={scale <= 0.5}
+          >
+            <ZoomOut size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={handleReset}
+            className="p-1.5 rounded-full hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer"
+            title="원본 크기 리셋 (0)"
+          >
+            <RotateCw size={16} />
+          </button>
+          <span className="text-xs font-bold text-teal-400 ml-1 min-w-[42px] text-right">
+            {Math.round(scale * 100)}%
+          </span>
         </div>
       </div>
     </div>,

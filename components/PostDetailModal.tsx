@@ -757,12 +757,13 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
         />
       )}
 
-      {/* 이미지 뷰어 모달 */}
+      {/* [한글 코멘트] 카카오톡 스타일 이미지 뷰어 모달 */}
       <ImageViewerModal
         isOpen={showImageViewer}
         onClose={() => setShowImageViewer(false)}
         images={imageViewerImages}
         initialIndex={imageViewerIndex}
+        title={post?.title ? `[주보] ${post.title}` : '주보 및 이미지 크게보기'}
       />
     </>
   );
