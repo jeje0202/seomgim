@@ -907,78 +907,32 @@ const BoardSection: React.FC = () => {
                     <p className="text-sm mt-2">첫 번째 게시글을 작성해보세요!</p>
                   </div>
                 ) : (
-                  posts.map((post) => {
-                    // [한글 코멘트] 게시글 본문 및 image_url에서 이미지 URL 목록 추출 헬퍼
-                    const extractPostImages = () => {
-                      const imgs: string[] = [];
-                      if (post.image_url) imgs.push(post.image_url);
-                      if (post.content) {
-                        const matched = post.content.match(/src=["']([^"']+)["']/gi);
-                        if (matched) {
-                          matched.forEach((m: string) => {
-                            const src = m.replace(/src=["']/i, '').replace(/["']$/, '');
-                            if (src && !imgs.includes(src)) imgs.push(src);
-                          });
-                        }
-                      }
-                      return imgs;
-                    };
-                    const bulletinImages = extractPostImages();
-
-                    return (
-                      <div
-                        key={post.post_id}
-                        onClick={() => {
-                          // [한글 코멘트] 주보게시판인 경우 카카오톡 뷰어로 주보 이미지 직접 크게보기 실행
-                          if (currentCategory?.category_code === 'bulletin' && bulletinImages.length > 0) {
-                            setImageViewerImages(bulletinImages);
-                            setImageViewerIndex(0);
-                            setImageViewerTitle(`[주보] ${post.title}`);
-                            setShowImageViewer(true);
-                            return;
-                          }
-                          setSelectedPostId(post.post_id);
-                          setShowDetailModal(true);
-                        }}
-                        className="p-5 hover:bg-slate-50 transition-colors cursor-pointer group relative border-b border-slate-100 last:border-b-0"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              {post.is_notice && (
-                                <span className="px-2 py-0.5 bg-rose-500 text-white text-xs font-bold rounded">
-                                  공지
-                                </span>
-                              )}
-                              <h4 className="text-lg font-bold text-slate-800 group-hover:text-teal-600 transition-colors truncate">
-                                {post.title}
-                              </h4>
-                              {(post.comment_count > 0 || (post as any).comment_count > 0) && (
-                                <span className="text-teal-500 font-semibold text-sm">
-                                  [{(post.comment_count || (post as any).comment_count)}]
-                                </span>
-                              )}
-                            </div>
-
-                            {/* [한글 코멘트] 주보게시판 항목 카카오톡 스타일 주보 크게보기 배지 버튼 */}
-                            {currentCategory?.category_code === 'bulletin' && bulletinImages.length > 0 && (
-                              <div className="mb-3 flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setImageViewerImages(bulletinImages);
-                                    setImageViewerIndex(0);
-                                    setImageViewerTitle(`[주보] ${post.title}`);
-                                    setShowImageViewer(true);
-                                  }}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-full text-xs font-bold transition-all shadow-sm cursor-pointer"
-                                >
-                                  <Maximize2 size={13} />
-                                  <span>📱 카카오톡 방식으로 주보 크게보기 ({bulletinImages.length}면)</span>
-                                </button>
-                              </div>
+                  posts.map((post) => (
+                    <div
+                      key={post.post_id}
+                      onClick={() => {
+                        setSelectedPostId(post.post_id);
+                        setShowDetailModal(true);
+                      }}
+                      className="p-5 hover:bg-slate-50 transition-colors cursor-pointer group relative border-b border-slate-100 last:border-b-0"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            {post.is_notice && (
+                              <span className="px-2 py-0.5 bg-rose-500 text-white text-xs font-bold rounded">
+                                공지
+                              </span>
                             )}
+                            <h4 className="text-lg font-bold text-slate-800 group-hover:text-teal-600 transition-colors truncate">
+                              {post.title}
+                            </h4>
+                            {(post.comment_count > 0 || (post as any).comment_count > 0) && (
+                              <span className="text-teal-500 font-semibold text-sm">
+                                [{(post.comment_count || (post as any).comment_count)}]
+                              </span>
+                            )}
+                          </div>
                           {/* 태그 표시 (기관게시판 및 성도게시판) */}
                           {(post.category_code === 'organization' || post.category_code === 'member') && post.tags && post.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1051,8 +1005,7 @@ const BoardSection: React.FC = () => {
                         )}
                       </div>
                     </div>
-                  );
-                })
+                  ))
                 )}
               </div>
 
