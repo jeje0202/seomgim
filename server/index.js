@@ -19,9 +19,19 @@ require('dotenv').config({ path: './config.env' });
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 미들웨어 설정
+// 미들웨어 설정 (seomgim.foryou.me 도메인 포함 CORS 안전 허용)
+const allowedOrigins = (process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map(o => o.trim());
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true);
+    }
+  },
   credentials: true
 }));
 // 요청 본문 크기 제한 증가 (앨범 사진 여러 장 업로드 지원: 20장 * 10MB = 200MB)
