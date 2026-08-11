@@ -13,7 +13,8 @@ const accessKeyId = process.env.R2_ACCESS_KEY_ID || '61cc07b252f86956a177521903a
 const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '656833bba1679af72f68a2449e917923246daf6e90a6d914e5d4ae6e905ffcaa';
 const bucketName = process.env.R2_BUCKET_NAME || 'media';
 const endpointUrl = process.env.R2_ENDPOINT_URL || `https://${accountId}.r2.cloudflarestorage.com`;
-const publicUrl = process.env.R2_PUBLIC_URL || `${endpointUrl}/${bucketName}`;
+const publicUrl = process.env.R2_PUBLIC_URL || 'https://media.foryou.me';
+const r2Prefix = process.env.R2_PREFIX || 'seomgim/data';
 
 // [한글 코멘트] S3 호환 Cloudflare R2 클라이언트 객체 생성
 const s3Client = new S3Client({
@@ -41,9 +42,9 @@ const getMimeType = (filePathOrKey) => {
 };
 
 /**
- * [한글 코멘트] 버퍼 또는 디스크 파일 경로를 Cloudflare R2에 업로드하는 함수
+ * [한글 코멘트] 버퍼 또는 디스크 파일 경로를 Cloudflare R2의 seomgim/data/ 경로에 업로드하는 함수
  * @param {Buffer|string} input - 파일 경로(string) 또는 파일 데이터(Buffer)
- * @param {string} r2Key - R2 버깃 내 대상 경로 Key (예: uploads/album/album1/photo.jpg)
+ * @param {string} r2Key - R2 버깃 내 대상 경로 Key (예: seomgim/data/album/202605/photo.jpg)
  * @param {string} [customMimeType] - MIME 타입 (선택)
  * @returns {Promise<{success: boolean, key: string, url: string}>}
  */
@@ -65,8 +66,13 @@ const uploadToR2 = async (input, r2Key, customMimeType = null) => {
       throw new Error('올바르지 않은 입력 형식입니다 (string 경로 또는 Buffer 지원)');
     }
 
-    // 앞부분 슬래시(/) 제거 처리
-    const cleanKey = r2Key.startsWith('/') ? r2Key.substring(1) : r2Key;
+    // [한글 코멘트] 사용자 요청: media.foryou.me/seomgim/data 접두사 경로 정형화
+    let cleanKey = r2Key.startsWith('/') ? r2Key.substring(1) : r2Key;
+    if (cleanKey.startsWith('uploads/')) {
+      cleanKey = cleanKey.replace(/^uploads\//, `${r2Prefix}/`);
+    } else if (!cleanKey.startsWith(`${r2Prefix}/`)) {
+      cleanKey = `${r2Prefix}/${cleanKey}`;
+    }
 
     const command = new PutObjectCommand({
       Bucket: bucketName,
@@ -77,12 +83,12 @@ const uploadToR2 = async (input, r2Key, customMimeType = null) => {
 
     await s3Client.send(command);
 
-    const r2Url = `/uploads/${cleanKey.replace(/^uploads\//, '')}`;
+    const fullPublicUrl = `${publicUrl}/${cleanKey}`;
 
     return {
       success: true,
       key: cleanKey,
-      url: r2Url,
+      url: fullPublicUrl,
       bucket: bucketName
     };
   } catch (error) {
@@ -97,7 +103,12 @@ const uploadToR2 = async (input, r2Key, customMimeType = null) => {
  */
 const deleteFromR2 = async (r2Key) => {
   try {
-    const cleanKey = r2Key.startsWith('/') ? r2Key.substring(1) : r2Key;
+    let cleanKey = r2Key.startsWith('/') ? r2Key.substring(1) : r2Key;
+    if (cleanKey.startsWith('uploads/')) {
+      cleanKey = cleanKey.replace(/^uploads\//, `${r2Prefix}/`);
+    } else if (!cleanKey.startsWith(`${r2Prefix}/`)) {
+      cleanKey = `${r2Prefix}/${cleanKey}`;
+    }
     const command = new DeleteObjectCommand({
       Bucket: bucketName,
       Key: cleanKey
@@ -116,7 +127,12 @@ const deleteFromR2 = async (r2Key) => {
  */
 const getObjectFromR2 = async (r2Key) => {
   try {
-    const cleanKey = r2Key.startsWith('/') ? r2Key.substring(1) : r2Key;
+    let cleanKey = r2Key.startsWith('/') ? r2Key.substring(1) : r2Key;
+    if (cleanKey.startsWith('uploads/')) {
+      cleanKey = cleanKey.replace(/^uploads\//, `${r2Prefix}/`);
+    } else if (!cleanKey.startsWith(`${r2Prefix}/`)) {
+      cleanKey = `${r2Prefix}/${cleanKey}`;
+    }
     const command = new GetObjectCommand({
       Bucket: bucketName,
       Key: cleanKey

@@ -60,7 +60,8 @@ const migrateAllImagesToR2 = async () => {
       batch.map(async (filePath, batchIdx) => {
         const index = i + batchIdx + 1;
         const relativePath = path.relative(dataDir, filePath).replace(/\\/g, '/');
-        const r2Key = `uploads/${relativePath}`;
+        // [한글 코멘트] 사용자 요청: media.foryou.me/seomgim/data/ 하위 폴더 구조에 맞춰 R2 Key 설정
+        const r2Key = `seomgim/data/${relativePath}`;
 
         try {
           const stats = fs.statSync(filePath);
@@ -72,7 +73,7 @@ const migrateAllImagesToR2 = async () => {
           totalBytesTransferred += stats.size;
 
           const progress = ((index / totalFiles) * 100).toFixed(1);
-          console.log(`[${index}/${totalFiles}] (${progress}%) ✅ 성공: ${relativePath} (${fileSizeMB}MB) -> R2 Key: ${r2Key}`);
+          console.log(`[${index}/${totalFiles}] (${progress}%) ✅ 성공: ${relativePath} (${fileSizeMB}MB) -> R2 URL: https://media.foryou.me/${r2Key}`);
         } catch (err) {
           failCount++;
           console.error(`[${index}/${totalFiles}] ❌ 실패: ${relativePath} -> 오류: ${err.message}`);
