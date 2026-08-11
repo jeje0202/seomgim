@@ -10,6 +10,8 @@ const activityRoutes = require('./routes/activity');
 const albumRoutes = require('./routes/albums');
 const eventsRoutes = require('./routes/events');
 const surveyRoutes = require('./routes/surveys');
+// [한글 코멘트] 슈퍼관리자 CMS 영역 편집 및 SQLite 이력/복구 API 라우터 모듈 불러오기
+const cmsRoutes = require('./routes/cms');
 // YouTube API는 더 이상 사용하지 않음
 // const youtubeRoutes = require('./routes/youtube');
 require('dotenv').config({ path: './config.env' });
@@ -113,8 +115,8 @@ if (fs.existsSync(thumbnailBaseDir)) {
 
 // 게시판별 이미지 서빙 (data/board 폴더 및 하위 폴더들)
 if (fs.existsSync(boardDir)) {
-  // 게시판별 하위 폴더 서빙
-  const boardSubDirs = ['jubo', 'normal', 'part', 'notice'];
+  // 게시판별 하위 폴더 서빙 (pasted 붙여넣기 이미지 서빙 추가)
+  const boardSubDirs = ['jubo', 'normal', 'part', 'notice', 'pasted'];
   boardSubDirs.forEach(subDir => {
     const subDirPath = path.join(boardDir, subDir);
     if (fs.existsSync(subDirPath)) {
@@ -138,7 +140,7 @@ if (fs.existsSync(boardDir)) {
     fs.mkdirSync(boardDir, { recursive: true });
     console.log(`✅ 게시판 디렉토리 생성됨: ${boardDir}`);
     // 하위 폴더들도 생성
-    const boardSubDirs = ['jubo', 'normal', 'part', 'notice'];
+    const boardSubDirs = ['jubo', 'normal', 'part', 'notice', 'pasted'];
     boardSubDirs.forEach(subDir => {
       const subDirPath = path.join(boardDir, subDir);
       fs.mkdirSync(subDirPath, { recursive: true });
@@ -195,6 +197,8 @@ app.use('/api/activity', activityRoutes);
 app.use('/api/albums', albumRoutes);
 app.use('/api/events', eventsRoutes.router);
 app.use('/api/surveys', surveyRoutes);
+// [한글 코멘트] 슈퍼관리자 CMS 영역 편집 및 SQLite 기반 이력/복구 API 엔드포인트 마운트
+app.use('/api/cms', cmsRoutes);
 // YouTube API는 더 이상 사용하지 않음
 // app.use('/api/youtube', youtubeRoutes);
 

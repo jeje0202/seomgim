@@ -78,13 +78,13 @@ async function initializeDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    // 게시글 테이블
+    // 게시글 테이블 (content 컬럼: 대용량 이미지/Base64 지원을 위해 LONGTEXT 적용)
     await connection.query(`
       CREATE TABLE IF NOT EXISTS board_posts (
         post_id INT AUTO_INCREMENT PRIMARY KEY,
         category_id INT NOT NULL COMMENT '게시판 카테고리 ID',
         title VARCHAR(200) NOT NULL COMMENT '제목',
-        content TEXT NOT NULL COMMENT '내용',
+        content LONGTEXT NOT NULL COMMENT '내용 (대용량 붙여넣기 이미지 지원)',
         author_name VARCHAR(50) NOT NULL COMMENT '작성자 이름',
         author_password VARCHAR(255) NOT NULL COMMENT '비밀번호 (해시)',
         image_url VARCHAR(500) COMMENT '이미지 URL (주보게시판용)',
@@ -99,6 +99,16 @@ async function initializeDatabase() {
         INDEX idx_notice (is_notice, created_at DESC)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // [한글 코멘트] 게시글 본문 이미지 붙여넣기 용량 초과 방지: content 컬럼을 LONGTEXT로 변경
+    try {
+      await connection.query(`
+        ALTER TABLE board_posts 
+        MODIFY COLUMN content LONGTEXT NOT NULL COMMENT '내용 (대용량 붙여넣기 이미지 지원)'
+      `);
+    } catch (error) {
+      // 이미 변경되었거나 오류 발생 시 무시
+    }
 
     // 기존 테이블에 image_url 컬럼 추가 (없는 경우)
     try {

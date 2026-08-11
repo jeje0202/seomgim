@@ -6,7 +6,68 @@ const bcrypt = require('bcrypt');
 const { body, validationResult, param, query } = require('express-validator');
 const { optionalAuth } = require('../middleware/auth');
 const fs = require('fs');
+const path = require('path');
+const sharp = require('sharp');
 const { getThumbnailFilePathFromUrl, getBoardFilePathFromUrl } = require('../utils/filePathHelper');
+
+// [한글 코멘트] 본문 내용에 붙여넣은 Base64 이미지를 추출하여 10MB 이하로 자동 압축/리사이징 후 서버 디스크 파일로 저장하고 정적 URL로 치환하는 헬퍼 함수
+const processBase64Images = async (htmlContent) => {
+  if (!htmlContent || typeof htmlContent !== 'string') return htmlContent;
+
+  const base64Regex = /src=["'](data:image\/(png|jpeg|jpg|gif|webp);base64,([^"']+))["']/gi;
+  let match;
+  let processedContent = htmlContent;
+
+  const projectRoot = path.resolve(__dirname, '..', '..');
+  const pastedDir = path.join(projectRoot, 'data', 'board', 'pasted');
+
+  if (!fs.existsSync(pastedDir)) {
+    fs.mkdirSync(pastedDir, { recursive: true });
+  }
+
+  const MAX_BYTES = 10 * 1024 * 1024; // 10MB 용량 한도
+
+  while ((match = base64Regex.exec(htmlContent)) !== null) {
+    const fullDataUri = match[1];
+    const rawType = match[2].toLowerCase();
+    const imageType = rawType === 'jpeg' ? 'jpg' : rawType;
+    const base64Data = match[3];
+
+    try {
+      let buffer = Buffer.from(base64Data, 'base64');
+      const ext = imageType === 'png' ? 'png' : 'jpg';
+      const fileName = `pasted_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+      const filePath = path.join(pastedDir, fileName);
+
+      // [한글 코멘트] 사용자 요청: 붙여넣기한 이미지 용량이 10MB를 초과하거나 고용량인 경우 Sharp로 10MB 이하 및 1920px 해상도로 자동 리사이징/압축
+      if (buffer.length > MAX_BYTES || buffer.length > 2 * 1024 * 1024) {
+        try {
+          console.log(`📸 붙여넣은 이미지 용량(${Math.round(buffer.length / 1024 / 1024)}MB) 감지: 10MB 이하 자동 리사이징/압축 진행 중...`);
+          const compressedBuffer = await sharp(buffer)
+            .resize({ width: 1920, height: 1920, fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 82, progressive: true })
+            .toBuffer();
+
+          if (compressedBuffer && compressedBuffer.length > 0) {
+            buffer = compressedBuffer;
+            console.log(`✅ 이미지 압축 완료: ${Math.round(buffer.length / 1024)}KB`);
+          }
+        } catch (sharpError) {
+          console.error('⚠️ Sharp 이미지 압축 실패, 원본 버퍼 저장 진행:', sharpError.message);
+        }
+      }
+
+      await fs.promises.writeFile(filePath, buffer);
+
+      const fileUrl = `/uploads/board/pasted/${fileName}`;
+      processedContent = processedContent.replace(fullDataUri, fileUrl);
+    } catch (err) {
+      console.error('❌ Base64 붙여넣기 이미지 처리 중 오류 발생:', err);
+    }
+  }
+
+  return processedContent;
+};
 
 // 카테고리별 권한 체크 미들웨어
 const checkCategoryPermission = async (req, res, next) => {
@@ -581,6 +642,9 @@ router.post('/posts',
 
       const { category_id, title, content, author_name, author_password, is_notice = false, image_url, tags } = req.body;
 
+      // [한글 코멘트] 본문 내 붙여넣은 Base64 이미지를 추출하여 서버 디스크 파일에 저장 후 URL 변환
+      const processedContent = await processBase64Images(content);
+
       // 비밀번호 해시화
       const hashedPassword = await bcrypt.hash(author_password, 10);
 
@@ -595,7 +659,7 @@ router.post('/posts',
         const [result] = await connection.query(`
           INSERT INTO board_posts (category_id, title, content, author_name, author_password, is_notice, image_url)
           VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [category_id, title, content, author_name, hashedPassword, is_notice, image_url || null]);
+        `, [category_id, title, processedContent, author_name, hashedPassword, is_notice, image_url || null]);
         
         const postId = result.insertId;
         
@@ -670,6 +734,9 @@ router.put('/posts/:id',
       const { id } = req.params;
       const { title, content, author_password, is_notice, image_url, tags } = req.body;
 
+      // [한글 코멘트] 본문 내 붙여넣은 Base64 이미지를 추출하여 서버 디스크 파일에 저장 후 URL 변환
+      const processedContent = await processBase64Images(content);
+
       const pool = getPool();
       
       // 트랜잭션 시작
@@ -699,7 +766,7 @@ router.put('/posts/:id',
 
         // 게시글 수정 (image_url과 is_notice도 업데이트)
         const updateFields = ['title = ?', 'content = ?'];
-        const updateValues = [title, content];
+        const updateValues = [title, processedContent];
         
         if (image_url !== undefined) {
           updateFields.push('image_url = ?');

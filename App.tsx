@@ -9,8 +9,13 @@ import { ChurchLogo } from './components/ChurchLogo';
 import AlertModal from './components/AlertModal';
 import { NavSection, ServiceTime } from './types';
 import { MapPin, Phone, Clock, Mail, Globe, Users, HandHeart, Flower2, PhoneCall } from 'lucide-react';
-import { getUserInfo, logout } from './services/authApi';
+import { getUserInfo, logout, User } from './services/authApi';
 import { trackActivity } from './services/activityApi';
+// [한글 코멘트] 슈퍼관리자 전용 SQLite CMS 연동 커스텀 훅 및 편집 래퍼/모달 컴포넌트 임포트
+import { useCmsContent } from './hooks/useCmsContent';
+import EditableSection from './components/EditableSection';
+import SectionEditModal from './components/SectionEditModal';
+import { CmsSectionItem } from './services/cmsApi';
 
 const App: React.FC = () => {
   const [activeSection, setActiveSection] = useState<NavSection>(NavSection.HOME);
@@ -26,6 +31,51 @@ const App: React.FC = () => {
     message: '',
     type: 'info'
   });
+
+  // [한글 코멘트] 현재 로그인 사용자 및 SQLite CMS 데이터 상태 관리 훅 연결
+  const [currentUser, setCurrentUser] = useState<User | null>(getUserInfo());
+  const { getSectionContent, updateSectionState } = useCmsContent();
+
+  // [한글 코멘트] 슈퍼관리자 CMS 영역 편집 모달 상태
+  const [cmsEditModal, setCmsEditModal] = useState<{
+    isOpen: boolean;
+    sectionKey: string;
+    sectionTitle: string;
+    initialData: any;
+    initialTab?: 'edit' | 'history';
+  }>({
+    isOpen: false,
+    sectionKey: '',
+    sectionTitle: '',
+    initialData: null,
+    initialTab: 'edit'
+  });
+
+  // [한글 코멘트] 로그인 사용자 정보 갱신 감지
+  useEffect(() => {
+    const handleUserChange = () => {
+      setCurrentUser(getUserInfo());
+    };
+    window.addEventListener('storage', handleUserChange);
+    return () => window.removeEventListener('storage', handleUserChange);
+  }, []);
+
+  // [한글 코멘트] CMS 영역 편집 모달 열기 핸들러 (initialTab 파라미터 추가)
+  const handleOpenCmsEditModal = (
+    key: string,
+    title: string,
+    defaultData: any,
+    initialTab: 'edit' | 'history' = 'edit'
+  ) => {
+    const contentData = getSectionContent(key, defaultData);
+    setCmsEditModal({
+      isOpen: true,
+      sectionKey: key,
+      sectionTitle: title,
+      initialData: contentData,
+      initialTab
+    });
+  };
 
   // 세션 타임아웃 시간 (30분 = 1800000ms)
   const SESSION_TIMEOUT = 30 * 60 * 1000;
@@ -201,6 +251,46 @@ const App: React.FC = () => {
           <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/3 w-[800px] h-[800px] bg-gradient-to-br from-teal-50/50 to-blue-50/50 rounded-full blur-3xl -z-10"></div>
 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            {/* [한글 코멘트] 사용자 요청: 상단 제어 바 위치를 전체 섹션 최상단(교회 전경 및 소개 영역 위)으로 이동 */}
+            {currentUser?.role === 'super-admin' && (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl sm:rounded-full px-6 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm mb-8">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 bg-teal-400 rounded-full inline-block shrink-0"></span>
+                  <span className="text-sm font-bold text-slate-700">
+                    관리자 전용 웹사이트 주요 영역 편집 제어
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleOpenCmsEditModal('pastor_greeting', '웹사이트 주요 영역', {
+                      pastor_name: '박신철 목사',
+                      pastor_role: 'Senior Pastor',
+                      slogan: '이웃을 섬기며 성장하는 열린 교회',
+                      greeting_title: '할렐루야! 주님의 이름으로 환영합니다.',
+                      greeting_body: '창원섬김의교회는 상처 입은 영혼들이 예수님의 사랑 안에서 치유받고 회복되어, 세상 속에서 향기로운 들꽃처럼 피어나기를 소망하는 믿음의 공동체입니다.\n\n말씀이 살아 숨 쉬고 따뜻한 섬김이 있는 이곳에서, 여러분과 함께 아름다운 천국 가족을 이루어가길 기도합니다.'
+                    }, 'edit')}
+                    className="px-4 py-1.5 bg-[#009688] hover:bg-[#00796b] text-white rounded-full text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  >
+                    실시간 레이아웃 편집
+                  </button>
+
+                  <button
+                    onClick={() => handleOpenCmsEditModal('pastor_greeting', '웹사이트 주요 영역', {
+                      pastor_name: '박신철 목사',
+                      pastor_role: 'Senior Pastor',
+                      slogan: '이웃을 섬기며 성장하는 열린 교회',
+                      greeting_title: '할렐루야! 주님의 이름으로 환영합니다.',
+                      greeting_body: '창원섬김의교회는 상처 입은 영혼들이 예수님의 사랑 안에서 치유받고 회복되어, 세상 속에서 향기로운 들꽃처럼 피어나기를 소망하는 믿음의 공동체입니다.\n\n말씀이 살아 숨 쉬고 따뜻한 섬김이 있는 이곳에서, 여러분과 함께 아름다운 천국 가족을 이루어가길 기도합니다.'
+                    }, 'history')}
+                    className="px-4 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-full text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  >
+                    편집 이력 복구
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-start mb-16">
 
               {/* Left Column: Image & Pastor Greeting */}
@@ -215,33 +305,52 @@ const App: React.FC = () => {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
                 </div>
 
-                {/* Pastor Profile & Greeting Card */}
-                <div className="bg-white p-8 rounded-3xl shadow-lg border border-slate-100 relative group hover:border-rose-100 transition-colors">
-                  <div className="mb-6">
-                    <span className="text-sm font-bold text-slate-400 uppercase tracking-wide">Senior Pastor</span>
-                    <h3 className="text-3xl font-serif font-bold text-slate-800 mt-1">박신철 목사</h3>
-                    <p className="text-teal-700 text-lg mt-2 font-bold tracking-wide bg-gradient-to-r from-teal-50 to-blue-50 px-4 py-2 rounded-lg border-l-4 border-teal-500 shadow-sm">
-                      이웃을 섬기며 성장하는 열린 교회
-                    </p>
-                  </div>
+                {/* [한글 코멘트] 첨부 1: 담임목사 인사말 영역 (EditableSection 감싸기 및 CMS 연동) */}
+                <EditableSection
+                  sectionKey="pastor_greeting"
+                  sectionTitle="담임목사 인사말"
+                  user={currentUser}
+                  onEditClick={(key) => handleOpenCmsEditModal(key, '담임목사 인사말', {
+                    pastor_name: '박신철 목사',
+                    pastor_role: 'Senior Pastor',
+                    slogan: '이웃을 섬기며 성장하는 열린 교회',
+                    greeting_title: '할렐루야! 주님의 이름으로 환영합니다.',
+                    greeting_body: '창원섬김의교회는 상처 입은 영혼들이 예수님의 사랑 안에서 치유받고 회복되어, 세상 속에서 향기로운 들꽃처럼 피어나기를 소망하는 믿음의 공동체입니다.\n\n말씀이 살아 숨 쉬고 따뜻한 섬김이 있는 이곳에서, 여러분과 함께 아름다운 천국 가족을 이루어가길 기도합니다.'
+                  })}
+                >
+                  {(() => {
+                    const pastorContent = getSectionContent('pastor_greeting', {
+                      pastor_name: '박신철 목사',
+                      pastor_role: 'Senior Pastor',
+                      slogan: '이웃을 섬기며 성장하는 열린 교회',
+                      greeting_title: '할렐루야! 주님의 이름으로 환영합니다.',
+                      greeting_body: '창원섬김의교회는 상처 입은 영혼들이 예수님의 사랑 안에서 치유받고 회복되어, 세상 속에서 향기로운 들꽃처럼 피어나기를 소망하는 믿음의 공동체입니다.\n\n말씀이 살아 숨 쉬고 따뜻한 섬김이 있는 이곳에서, 여러분과 함께 아름다운 천국 가족을 이루어가길 기도합니다.'
+                    });
+                    return (
+                      <div className="bg-white p-8 rounded-3xl shadow-lg border border-slate-100 relative group hover:border-rose-100 transition-colors min-h-[300px]">
+                        <div className="mb-6">
+                          <span className="text-sm font-bold text-slate-400 uppercase tracking-wide">{pastorContent.pastor_role}</span>
+                          <h3 className="text-3xl font-serif font-bold text-slate-800 mt-1">{pastorContent.pastor_name}</h3>
+                          <p className="text-teal-700 text-lg mt-2 font-bold tracking-wide bg-gradient-to-r from-teal-50 to-blue-50 px-4 py-2 rounded-lg border-l-4 border-teal-500 shadow-sm whitespace-pre-line">
+                            {pastorContent.slogan}
+                          </p>
+                        </div>
 
-                  <div className="relative">
-                    <span className="absolute -top-2 -left-2 text-4xl text-slate-200 font-serif">"</span>
-                    <div className="text-slate-600 leading-relaxed font-light pl-4 border-l-2 border-rose-200">
-                      <p className="mb-3">
-                        <strong className="text-slate-800 font-medium">할렐루야! 주님의 이름으로 환영합니다.</strong>
-                      </p>
-                      <p className="mb-2">
-                        창원섬김의교회는 상처 입은 영혼들이 예수님의 사랑 안에서 치유받고 회복되어,
-                        세상 속에서 향기로운 들꽃처럼 피어나기를 소망하는 믿음의 공동체입니다.
-                      </p>
-                      <p>
-                        말씀이 살아 숨 쉬고 따뜻한 섬김이 있는 이곳에서,
-                        여러분과 함께 아름다운 천국 가족을 이루어가길 기도합니다.
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                        <div className="relative">
+                          <span className="absolute -top-2 -left-2 text-4xl text-slate-200 font-serif">"</span>
+                          <div className="text-slate-600 leading-relaxed font-light pl-4 border-l-2 border-rose-200 whitespace-pre-line">
+                            <p className="mb-3">
+                              <strong className="text-slate-800 font-medium">{pastorContent.greeting_title}</strong>
+                            </p>
+                            <p className="whitespace-pre-line">
+                              {pastorContent.greeting_body}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </EditableSection>
               </div>
 
               {/* Right Column: Introduction & Vision */}
@@ -255,166 +364,285 @@ const App: React.FC = () => {
                   </h2>
                 </div>
 
-                {/* Founding Purpose Box (Green) */}
-                <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 to-white p-8 rounded-3xl shadow-sm border border-emerald-100/60 group hover:shadow-md transition-all">
-                  <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-20 transition-opacity">
-                    <Flower2 size={100} className="text-emerald-600" />
-                  </div>
+                {/* [한글 코멘트] 1. 설립 목적 영역 (고정 크기 래퍼 및 슈퍼관리자 편집 연결) */}
+                <EditableSection
+                  sectionKey="church_purpose"
+                  sectionTitle="교회 설립 목적"
+                  user={currentUser}
+                  onEditClick={(key) => handleOpenCmsEditModal(key, '교회 설립 목적', {
+                    subtitle: '우리 교회의 설립목적은 상담치유를 위한 들꽃 목회입니다.',
+                    description: '힘들고 지친 이들이 들녘에 있는 이름 없는 야생화와의 만남을 통해 인생의 새로운 의미를 찾아 위로와 소망을 갖게 하며, 새로운 인생에 도전하게 하는 들꽃을 의미합니다.'
+                  })}
+                >
+                  {(() => {
+                    const purposeContent = getSectionContent('church_purpose', {
+                      subtitle: '우리 교회의 설립목적은 상담치유를 위한 들꽃 목회입니다.',
+                      description: '힘들고 지친 이들이 들녘에 있는 이름 없는 야생화와의 만남을 통해 인생의 새로운 의미를 찾아 위로와 소망을 갖게 하며, 새로운 인생에 도전하게 하는 들꽃을 의미합니다.'
+                    });
+                    return (
+                      <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 to-white p-8 rounded-3xl shadow-sm border border-emerald-100/60 group hover:shadow-md transition-all min-h-[220px]">
+                        <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-20 transition-opacity">
+                          <Flower2 size={100} className="text-emerald-600" />
+                        </div>
 
-                  <h3 className="relative z-10 text-xl font-bold text-emerald-800 mb-4 flex items-center gap-2">
-                    <Flower2 className="text-emerald-500" size={24} />
-                    교회 설립 목적
-                  </h3>
+                        <h3 className="relative z-10 text-xl font-bold text-emerald-800 mb-4 flex items-center gap-2">
+                          <Flower2 className="text-emerald-500" size={24} />
+                          교회 설립 목적
+                        </h3>
 
-                  <div className="relative z-10 text-slate-700 leading-relaxed">
-                    <p className="text-lg font-bold text-emerald-900 mb-3 border-b border-emerald-100 pb-3">
-                      우리 교회의 설립목적은 <span className="text-emerald-600">상담치유를 위한 들꽃 목회</span>입니다.
-                    </p>
-                    <p className="text-sm sm:text-base font-medium text-slate-600">
-                      힘들고 지친 이들이 들녘에 있는 <span className="text-emerald-700 font-bold">이름 없는 야생화</span>와의 만남을 통해
-                      인생의 새로운 의미를 찾아 위로와 소망을 갖게 하며, 새로운 인생에 도전하게 하는 들꽃을 의미합니다.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Vision Box (Blue) */}
-                <div className="relative overflow-hidden bg-gradient-to-br from-sky-50 to-white p-8 rounded-3xl shadow-sm border border-sky-100/60 group hover:shadow-md transition-all">
-                  <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-20 transition-opacity">
-                    <Globe size={100} className="text-sky-600" />
-                  </div>
-
-                  <h3 className="relative z-10 text-xl font-bold text-sky-800 mb-4 flex items-center gap-2">
-                    <Globe className="text-sky-500" size={24} />
-                    창원 섬김의 교회 비전
-                  </h3>
-
-                  <div className="relative z-10 space-y-4">
-                    <p className="text-slate-700 leading-relaxed">
-                      이 시대의 힘들어하는 <span className="font-bold text-sky-700">국내 가정, 소외계층, 청소년</span>,
-                      그리고 <span className="font-bold text-sky-700">해외 가난한 민족과 어린 영혼들</span>에게
-                      희망을 주는 비전을 가지고 있습니다.
-                    </p>
-
-                    <div className="bg-white/80 rounded-xl p-4 border border-sky-100 text-sm font-medium space-y-2 text-slate-600 shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 bg-sky-400 rounded-full"></span>
-                        <span>지역사회 지원센터 및 상담실 운영</span>
+                        <div className="relative z-10 text-slate-700 leading-relaxed">
+                          <p className="text-lg font-bold text-emerald-900 mb-3 border-b border-emerald-100 pb-3 whitespace-pre-line">
+                            {purposeContent.subtitle}
+                          </p>
+                          <p className="text-sm sm:text-base font-medium text-slate-600 whitespace-pre-line">
+                            {purposeContent.description}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 bg-sky-400 rounded-full"></span>
-                        <span>섬김과 나눔의 집 (무료급식)</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 bg-sky-400 rounded-full"></span>
-                        <span>평생교육 실천</span>
-                      </div>
-                    </div>
+                    );
+                  })()}
+                </EditableSection>
 
-                    <p className="font-serif font-bold text-sky-900 text-center pt-2 text-lg">
-                      "예수님의 사랑 이야기가 가득한 교회"
-                    </p>
-                  </div>
-                </div>
+                {/* [한글 코멘트] 2. 교회 비전 영역 (고정 크기 래퍼 및 슈퍼관리자 편집 연결) */}
+                <EditableSection
+                  sectionKey="church_vision"
+                  sectionTitle="창원 섬김의 교회 비전"
+                  user={currentUser}
+                  onEditClick={(key) => handleOpenCmsEditModal(key, '창원 섬김의 교회 비전', {
+                    description: '이 시대의 힘들어하는 국내 가정, 소외계층, 청소년, 그리고 해외 가난한 민족과 어린 영혼들에게 희망을 주는 비전을 가지고 있습니다.',
+                    items: [
+                      '지역사회 지원센터 및 상담실 운영',
+                      '섬김과 나눔의 집 (무료급식)',
+                      '평생교육 실천'
+                    ],
+                    slogan: '"예수님의 사랑 이야기가 가득한 교회"'
+                  })}
+                >
+                  {(() => {
+                    const visionContent = getSectionContent('church_vision', {
+                      description: '이 시대의 힘들어하는 국내 가정, 소외계층, 청소년, 그리고 해외 가난한 민족과 어린 영혼들에게 희망을 주는 비전을 가지고 있습니다.',
+                      items: [
+                        '지역사회 지원센터 및 상담실 운영',
+                        '섬김과 나눔의 집 (무료급식)',
+                        '평생교육 실천'
+                      ],
+                      slogan: '"예수님의 사랑 이야기가 가득한 교회"'
+                    });
+                    return (
+                      <div className="relative overflow-hidden bg-gradient-to-br from-sky-50 to-white p-8 rounded-3xl shadow-sm border border-sky-100/60 group hover:shadow-md transition-all min-h-[260px]">
+                        <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:opacity-20 transition-opacity">
+                          <Globe size={100} className="text-sky-600" />
+                        </div>
+
+                        <h3 className="relative z-10 text-xl font-bold text-sky-800 mb-4 flex items-center gap-2">
+                          <Globe className="text-sky-500" size={24} />
+                          창원 섬김의 교회 비전
+                        </h3>
+
+                        <div className="relative z-10 space-y-4">
+                          <p className="text-slate-700 leading-relaxed whitespace-pre-line">
+                            {visionContent.description}
+                          </p>
+
+                          <div className="bg-white/80 rounded-xl p-4 border border-sky-100 text-sm font-medium space-y-2 text-slate-600 shadow-sm">
+                            {(visionContent.items || []).map((item: string, idx: number) => (
+                              <div key={idx} className="flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-sky-400 rounded-full"></span>
+                                <span className="whitespace-pre-line">{item}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          <p className="font-serif font-bold text-sky-900 text-center pt-2 text-lg whitespace-pre-line">
+                            {visionContent.slogan}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </EditableSection>
               </div>
             </div>
 
-            {/* Bottom Row: Staff & Organizations (Separated) */}
+            {/* [한글 코멘트] 3 & 4. 섬기는 분들 및 부설/협력기관 영역 (고정 크기 래퍼 및 슈퍼관리자 편집 연결) */}
             <div className="border-t border-slate-100 pt-16">
               <div className="grid md:grid-cols-2 gap-12">
                 {/* Staff List */}
-                <div>
-                  <h3 className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-6">
-                    <Users size={20} className="text-teal-600" />
-                    섬기는 분들
-                  </h3>
-                  <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 space-y-4">
-                    <div className="flex flex-col sm:flex-row gap-2 pb-3 border-b border-slate-200 last:border-0 last:pb-0">
-                      <strong className="text-slate-800 min-w-[100px] shrink-0 font-serif">부목사/강도사</strong>
-                      <span className="text-slate-600 text-sm sm:text-base">전병학, 유보배, 정동호(선교), 박승현(중고등부)</span>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2 pb-3 border-b border-slate-200 last:border-0 last:pb-0">
-                      <strong className="text-slate-800 min-w-[100px] shrink-0 font-serif">장로</strong>
-                      <span className="text-slate-600 text-sm sm:text-base">박주현, (은퇴) 성재효, 성창규</span>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <strong className="text-slate-800 min-w-[100px] shrink-0 font-serif">파송선교사</strong>
-                      <span className="text-slate-600 text-sm sm:text-base">최성은(호주), 전용득(필리핀), 김바울(북방)</span>
-                    </div>
-                  </div>
-                </div>
+                <EditableSection
+                  sectionKey="serving_members"
+                  sectionTitle="섬기는 분들"
+                  user={currentUser}
+                  onEditClick={(key) => handleOpenCmsEditModal(key, '섬기는 분들', {
+                    pastors: '전병학, 유보배, 정동호(선교), 박승현(중고등부)',
+                    elders: '박주현, (은퇴) 성재효, 성창규',
+                    missionaries: '최성은(호주), 전용득(필리핀), 김바울(북방)'
+                  })}
+                >
+                  {(() => {
+                    const servingContent = getSectionContent('serving_members', {
+                      pastors: '전병학, 유보배, 정동호(선교), 박승현(중고등부)',
+                      elders: '박주현, (은퇴) 성재효, 성창규',
+                      missionaries: '최성은(호주), 전용득(필리핀), 김바울(북방)'
+                    });
+                    return (
+                      <div>
+                        <h3 className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-6">
+                          <Users size={20} className="text-teal-600" />
+                          섬기는 분들
+                        </h3>
+                        <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 space-y-4 min-h-[220px]">
+                          <div className="flex flex-col sm:flex-row gap-2 pb-3 border-b border-slate-200 last:border-0 last:pb-0">
+                            <strong className="text-slate-800 min-w-[100px] shrink-0 font-serif">부목사/강도사</strong>
+                            <span className="text-slate-600 text-sm sm:text-base">{servingContent.pastors}</span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-2 pb-3 border-b border-slate-200 last:border-0 last:pb-0">
+                            <strong className="text-slate-800 min-w-[100px] shrink-0 font-serif">장로</strong>
+                            <span className="text-slate-600 text-sm sm:text-base">{servingContent.elders}</span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <strong className="text-slate-800 min-w-[100px] shrink-0 font-serif">파송선교사</strong>
+                            <span className="text-slate-600 text-sm sm:text-base">{servingContent.missionaries}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </EditableSection>
 
                 {/* Organizations List */}
-                <div>
-                  <h3 className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-6">
-                    <HandHeart size={20} className="text-rose-600" />
-                    부설 기관 및 협력기관
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {organizations.map((org, idx) => (
-                      <div key={idx} className="bg-white border border-slate-100 p-3 rounded-xl shadow-sm hover:shadow-md hover:border-rose-100 transition-all">
-                        <span className="font-bold text-slate-800 text-sm block mb-1">{org.name}</span>
-                        {org.contact && (
-                          <div className="flex items-center gap-1.5 text-xs text-rose-500 font-medium">
-                            <PhoneCall size={10} />
-                            <span>{org.contact}</span>
+                <EditableSection
+                  sectionKey="partner_orgs"
+                  sectionTitle="부설 기관 및 협력기관"
+                  user={currentUser}
+                  onEditClick={(key) => handleOpenCmsEditModal(key, '부설 기관 및 협력기관', {
+                    attached: '창원섬김 부설 나눔상담연구소',
+                    partners: '국내외 미자립교회 및 선교단체'
+                  })}
+                >
+                  {(() => {
+                    const orgContent = getSectionContent('partner_orgs', {
+                      attached: '창원섬김 부설 나눔상담연구소',
+                      partners: '국내외 미자립교회 및 선교단체'
+                    });
+                    return (
+                      <div>
+                        <h3 className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-6">
+                          <HandHeart size={20} className="text-rose-600" />
+                          부설 기관 및 협력기관
+                        </h3>
+                        <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 space-y-4 min-h-[220px]">
+                          <div className="flex flex-col sm:flex-row gap-2 pb-3 border-b border-slate-200">
+                            <strong className="text-slate-800 min-w-[100px] shrink-0 font-serif">부설 기관</strong>
+                            <span className="text-slate-600 text-sm sm:text-base">{orgContent.attached}</span>
                           </div>
-                        )}
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <strong className="text-slate-800 min-w-[100px] shrink-0 font-serif">협력 기관</strong>
+                            <span className="text-slate-600 text-sm sm:text-base">{orgContent.partners}</span>
+                          </div>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    );
+                  })()}
+                </EditableSection>
               </div>
             </div>
 
           </div>
         </section>
 
-        {/* Worship Info Section */}
+        {/* [한글 코멘트] 첨부 2: 예배 안내 및 첨부 3: 온라인 헌금 안내 영역 (EditableSection 감싸기 및 CMS 연동) */}
         <section id={NavSection.WORSHIP} className="py-24 bg-white">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl font-serif font-bold text-slate-800">예배 안내</h2>
-              <p className="mt-4 text-slate-500">하나님과 만나는 감격스러운 시간으로 여러분을 초대합니다.</p>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-              {serviceTimes.map((service, index) => (
-                <div key={index} className="group bg-white p-4 rounded-xl shadow-sm border border-slate-100 hover:shadow-md hover:border-teal-200 transition-all duration-300">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 bg-teal-50 text-teal-600 rounded-full group-hover:bg-teal-100 transition-colors">
-                        <Clock size={16} />
-                      </div>
-                      <p className="text-sm font-serif text-rose-500 font-semibold">{service.time}</p>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+            {/* 예배 안내 영역 */}
+            <EditableSection
+              sectionKey="worship_schedule"
+              sectionTitle="예배 안내"
+              user={currentUser}
+              onEditClick={(key) => handleOpenCmsEditModal(key, '예배 안내', {
+                title: '예배 안내',
+                subtitle: '하나님과 만나는 감격스러운 시간으로 여러분을 초대합니다.',
+                services: serviceTimes
+              })}
+            >
+              {(() => {
+                const worshipContent = getSectionContent('worship_schedule', {
+                  title: '예배 안내',
+                  subtitle: '하나님과 만나는 감격스러운 시간으로 여러분을 초대합니다.',
+                  services: serviceTimes
+                });
+                const servicesList = worshipContent.services || serviceTimes;
+                return (
+                  <div>
+                    <div className="text-center mb-12">
+                      <h2 className="text-3xl font-serif font-bold text-slate-800">{worshipContent.title || '예배 안내'}</h2>
+                      <p className="mt-4 text-slate-500 whitespace-pre-line">{worshipContent.subtitle}</p>
                     </div>
-                    <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-full group-hover:bg-teal-50 group-hover:text-teal-700">
-                      {service.location}
-                    </span>
+
+                    <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+                      {servicesList.map((service: any, index: number) => (
+                        <div key={index} className="group bg-white p-4 rounded-xl shadow-sm border border-slate-100 hover:shadow-md hover:border-teal-200 transition-all duration-300">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <div className="p-2 bg-teal-50 text-teal-600 rounded-full group-hover:bg-teal-100 transition-colors">
+                                <Clock size={16} />
+                              </div>
+                              <p className="text-sm font-serif text-rose-500 font-semibold">{service.time}</p>
+                            </div>
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-full group-hover:bg-teal-50 group-hover:text-teal-700">
+                              {service.location}
+                            </span>
+                          </div>
+                          <h3 className="text-base font-bold text-slate-800">{service.name}</h3>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <h3 className="text-base font-bold text-slate-800">{service.name}</h3>
-                </div>
-              ))}
-            </div>
+                );
+              })()}
+            </EditableSection>
 
-            <div className="mt-12 p-8 bg-blue-50 rounded-3xl text-center border border-blue-100">
-              <div className="inline-flex p-4 bg-white rounded-full text-blue-500 mb-4 shadow-sm">
-                <HandHeart size={28} />
-              </div>
-              <h3 className="text-xl font-bold text-blue-900 mb-6">온라인 헌금 안내</h3>
+            {/* 온라인 헌금 안내 영역 */}
+            <EditableSection
+              sectionKey="online_offering"
+              sectionTitle="온라인 헌금 안내"
+              user={currentUser}
+              onEditClick={(key) => handleOpenCmsEditModal(key, '온라인 헌금 안내', {
+                title: '온라인 헌금 안내',
+                accounts: [
+                  { name: '교회 헌금', account: '2060-0054-8337', bank: '수협', holder: '대한예수교장로회창원섬김' },
+                  { name: '섬김과 나눔의 집 (무료급식)', account: '351-1227-6333-03', bank: '농협', holder: '대한예수교장로회창원섬김' }
+                ]
+              })}
+            >
+              {(() => {
+                const offeringContent = getSectionContent('online_offering', {
+                  title: '온라인 헌금 안내',
+                  accounts: [
+                    { name: '교회 헌금', account: '2060-0054-8337', bank: '수협', holder: '대한예수교장로회창원섬김' },
+                    { name: '섬김과 나눔의 집 (무료급식)', account: '351-1227-6333-03', bank: '농협', holder: '대한예수교장로회창원섬김' }
+                  ]
+                });
+                const accountsList = offeringContent.accounts || [];
+                return (
+                  <div className="p-8 bg-blue-50 rounded-3xl text-center border border-blue-100 min-h-[220px]">
+                    <div className="inline-flex p-4 bg-white rounded-full text-blue-500 mb-4 shadow-sm">
+                      <HandHeart size={28} />
+                    </div>
+                    <h3 className="text-xl font-bold text-blue-900 mb-6">{offeringContent.title || '온라인 헌금 안내'}</h3>
 
-              <div className="grid md:grid-cols-2 gap-4 max-w-3xl mx-auto">
-                <div className="bg-white p-5 rounded-2xl border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
-                  <p className="text-blue-600 font-bold mb-1">교회 헌금</p>
-                  <p className="text-lg font-bold text-slate-800">2060-0054-8337 <span className="text-sm font-normal text-slate-500 ml-1">수협</span></p>
-                  <p className="text-xs text-slate-400 mt-1">예금주: 대한예수교장로회창원섬김</p>
-                </div>
-                <div className="bg-white p-5 rounded-2xl border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
-                  <p className="text-blue-600 font-bold mb-1">섬김과 나눔의 집 (무료급식)</p>
-                  <p className="text-lg font-bold text-slate-800">351-1227-6333-03 <span className="text-sm font-normal text-slate-500 ml-1">농협</span></p>
-                  <p className="text-xs text-slate-400 mt-1">예금주: 대한예수교장로회창원섬김</p>
-                </div>
-              </div>
-            </div>
+                    <div className="grid md:grid-cols-2 gap-4 max-w-3xl mx-auto">
+                      {accountsList.map((acc: any, idx: number) => (
+                        <div key={idx} className="bg-white p-5 rounded-2xl border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
+                          <p className="text-blue-600 font-bold mb-1">{acc.name}</p>
+                          <p className="text-lg font-bold text-slate-800">{acc.account} <span className="text-sm font-normal text-slate-500 ml-1">{acc.bank}</span></p>
+                          <p className="text-xs text-slate-400 mt-1">예금주: {acc.holder}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </EditableSection>
           </div>
         </section>
 
@@ -567,6 +795,19 @@ const App: React.FC = () => {
           </div>
         </div>
       </footer>
+
+      {/* [한글 코멘트] 슈퍼관리자 전용 CMS 영역 내용 편집 및 이력/복구 모달창 */}
+      <SectionEditModal
+        isOpen={cmsEditModal.isOpen}
+        onClose={() => setCmsEditModal(prev => ({ ...prev, isOpen: false }))}
+        sectionKey={cmsEditModal.sectionKey}
+        sectionTitle={cmsEditModal.sectionTitle}
+        initialData={cmsEditModal.initialData}
+        initialTab={cmsEditModal.initialTab}
+        onSaved={(updatedSection) => {
+          updateSectionState(updatedSection);
+        }}
+      />
 
       {/* 알림 모달 */}
       <AlertModal

@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# [한글 코멘트] 업로드 데이터 디렉토리 및 SQLite DB, 환경설정 파일 Git 추적 제외
+data/
+server/data/
+server/config.env
