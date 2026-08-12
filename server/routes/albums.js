@@ -13,51 +13,8 @@ const { getAlbumStoragePath, getThumbnailStoragePath, getAlbumImageUrl, getThumb
 const { getAlbumFilePathFromUrl, getThumbnailFilePathFromUrl } = require('../utils/filePathHelper');
 const { uploadToR2, deleteFromR2 } = require('../utils/r2Storage');
 
-// data/album 디렉토리 생성 (없는 경우)
-const albumDir = path.join(__dirname, '../../data/album');
-if (!fs.existsSync(albumDir)) {
-  fs.mkdirSync(albumDir, { recursive: true });
-}
-
-// 썸네일 디렉토리 생성 (없는 경우)
-const thumbnailBaseDir = path.join(__dirname, '../../data/thumbnail');
-if (!fs.existsSync(thumbnailBaseDir)) {
-  fs.mkdirSync(thumbnailBaseDir, { recursive: true });
-}
-
-// multer 설정 (필드명에 따라 다른 저장 경로 사용)
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // 필드명에 따라 다른 저장 경로 결정
-    if (file.fieldname === 'fullImages') {
-      // 앨범 이미지: 500개마다 폴더 분리
-      const storagePath = getAlbumStoragePath();
-      // 저장 경로를 req에 저장 (나중에 URL 생성 시 사용)
-      if (!req.albumStoragePath) req.albumStoragePath = storagePath;
-      cb(null, storagePath);
-    } else if (file.fieldname === 'thumbnails') {
-      // 썸네일: 년월별 폴더
-      const storagePath = getThumbnailStoragePath();
-      // 저장 경로를 req에 저장
-      if (!req.thumbnailStoragePath) req.thumbnailStoragePath = storagePath;
-      cb(null, storagePath);
-    } else {
-      // 기본: 앨범 폴더
-      const storagePath = getAlbumStoragePath();
-      cb(null, storagePath);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname).toLowerCase();
-
-    if (file.fieldname === 'thumbnails') {
-      cb(null, `thumb-${uniqueSuffix}${ext}`);
-    } else {
-      cb(null, `album-${uniqueSuffix}${ext}`);
-    }
-  }
-});
+// [한글 코멘트] 로컬 디스크 저장 대신 multer.memoryStorage()를 사용하여 메모리 버퍼로 파일 수신
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif|webp/;
@@ -83,11 +40,12 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
+// [한글 코멘트] 사용자 요청: 앨범 첨부 사진 개별 최대 용량을 5MB로 설정 및 개수 50개로 설정
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB 제한 (안전 마진 포함)
-    files: 40 // 전체 파일 개수 제한 (fullImages + thumbnails = 최대 40개)
+    fileSize: 5 * 1024 * 1024, // 5MB 제한
+    files: 100 // 전체 파일 개수 제한 (fullImages + thumbnails = 최대 100개)
   },
   fileFilter: fileFilter
 });
@@ -102,22 +60,23 @@ router.post('/upload',
   authenticate,
   (req, res, next) => {
     // multer 에러 핸들러
+    // [한글 코멘트] 최대 50개 사진 첨부 허용
     upload.fields([
-      { name: 'fullImages', maxCount: 20 },
-      { name: 'thumbnails', maxCount: 20 }
+      { name: 'fullImages', maxCount: 50 },
+      { name: 'thumbnails', maxCount: 50 }
     ])(req, res, (err) => {
       if (err) {
         console.error('[사진 업로드] Multer 에러:', err);
         if (err.code === 'LIMIT_FILE_SIZE') {
           return res.status(400).json({
             success: false,
-            message: '파일 크기가 너무 큽니다. (최대 2MB)'
+            message: '파일 크기가 너무 큽니다. (최대 5MB)'
           });
         }
         if (err.code === 'LIMIT_FILE_COUNT') {
           return res.status(400).json({
             success: false,
-            message: '파일 개수가 너무 많습니다. (최대 20개)'
+            message: '파일 개수가 너무 많습니다. (최대 50개)'
           });
         }
         return res.status(400).json({
@@ -148,55 +107,51 @@ router.post('/upload',
         });
       }
 
-      // 썸네일과 원본 이미지를 매칭
-      const uploadedPhotos = fullImages.map((fullFile, index) => {
+      // [한글 코멘트] R2 클라우드 스토리지 직접 업로드 및 URL 생성 로직
+      const albumStoragePath = getAlbumStoragePath();
+      const thumbnailStoragePath = getThumbnailStoragePath();
+
+      const uploadedPhotos = [];
+
+      for (let index = 0; index < fullImages.length; index++) {
+        const fullFile = fullImages[index];
         const thumbnailFile = thumbnails[index] || null;
 
-        // 앨범 이미지 URL 생성 (저장 경로에 따라)
-        // multer가 저장한 실제 경로 사용 (req에 저장된 경로)
-        const albumStoragePath = req.albumStoragePath || getAlbumStoragePath();
-        const albumImageUrl = getAlbumImageUrl(fullFile.filename, albumStoragePath);
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const fullExt = path.extname(fullFile.originalname).toLowerCase() || '.jpg';
+        const fullFilename = `album-${uniqueSuffix}${fullExt}`;
+        const albumImageUrl = getAlbumImageUrl(fullFilename, albumStoragePath);
 
-        // 썸네일 URL 생성
-        // req에 저장된 썸네일 경로가 없으면 기본 경로 사용
-        const thumbnailStoragePath = req.thumbnailStoragePath || getThumbnailStoragePath();
-        const thumbnailImageUrl = thumbnailFile ? getThumbnailUrl(thumbnailFile.filename, thumbnailStoragePath) : null;
+        // [한글 코멘트] R2 업로드 (원본 이미지)
+        const fullR2Key = `uploads/${albumImageUrl.replace(/^\/uploads\//, '')}`;
+        await uploadToR2(fullFile.buffer, fullR2Key, fullFile.mimetype);
 
-        console.log(`[사진 업로드] 파일 매칭 - index: ${index}`);
-        console.log(`  앨범 이미지: ${fullFile.filename} -> ${albumImageUrl}`);
-        console.log(`  썸네일: ${thumbnailFile ? thumbnailFile.filename : '없음'} -> ${thumbnailImageUrl || '없음'}`);
+        let thumbnailImageUrl = null;
+        let thumbFilename = null;
 
-        return {
+        if (thumbnailFile) {
+          const thumbExt = path.extname(thumbnailFile.originalname).toLowerCase() || '.jpg';
+          thumbFilename = `thumb-${uniqueSuffix}${thumbExt}`;
+          thumbnailImageUrl = getThumbnailUrl(thumbFilename, thumbnailStoragePath);
+
+          // [한글 코멘트] R2 업로드 (썸네일 이미지)
+          const thumbR2Key = `uploads/${thumbnailImageUrl.replace(/^\/uploads\//, '')}`;
+          await uploadToR2(thumbnailFile.buffer, thumbR2Key, thumbnailFile.mimetype);
+        }
+
+        console.log(`[사진 업로드] R2 업로드 완료 - index: ${index}`);
+        console.log(`  앨범 이미지: ${fullFilename} -> ${albumImageUrl}`);
+        console.log(`  썸네일: ${thumbFilename || '없음'} -> ${thumbnailImageUrl || '없음'}`);
+
+        uploadedPhotos.push({
           url: albumImageUrl, // 1080p 이미지 URL
           thumbnailUrl: thumbnailImageUrl, // 썸네일 URL
-          filename: fullFile.filename,
-          thumbnailFilename: thumbnailFile ? thumbnailFile.filename : null
-        };
-      });
+          filename: fullFilename,
+          thumbnailFilename: thumbFilename
+        });
+      }
 
-      console.log(`[사진 업로드] ${uploadedPhotos.length}개 이미지 업로드 완료 (1080p + 썸네일)`);
-
-      // [한글 코멘트] R2 클라우드 스토리지 동기화 업로드
-      const { uploadToR2 } = require('../utils/r2Storage');
-      (async () => {
-        for (let i = 0; i < fullImages.length; i++) {
-          const f = fullImages[i];
-          const item = uploadedPhotos[i];
-          try {
-            if (f && f.path && item.url) {
-              const r2Key = `uploads/${item.url.replace(/^\/uploads\//, '')}`;
-              await uploadToR2(f.path, r2Key);
-            }
-            const thumbFile = thumbnails[i];
-            if (thumbFile && thumbFile.path && item.thumbnailUrl) {
-              const thumbR2Key = `uploads/${item.thumbnailUrl.replace(/^\/uploads\//, '')}`;
-              await uploadToR2(thumbFile.path, thumbR2Key);
-            }
-          } catch (r2Err) {
-            console.error('⚠️ 앨범 사진 R2 업로드 오류:', r2Err.message);
-          }
-        }
-      })();
+      console.log(`[사진 업로드] ${uploadedPhotos.length}개 이미지 Cloudflare R2 직접 업로드 완료`);
 
       res.json({
         success: true,
@@ -293,34 +248,12 @@ router.put('/:id',
       const deletedPhotos = existingPhotos.filter(ep => !newPhotoUrls.includes(ep.photo_url));
 
       deletedPhotos.forEach(photo => {
-        // 원본 이미지 삭제 (로컬 디스크 및 R2 클라우드 동시 삭제)
-        try {
-          const filePath = getAlbumFilePathFromUrl(photo.photo_url);
-          if (filePath && fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            console.log(`원본 파일 삭제 성공: ${filePath}`);
-          }
-          // [한글 코멘트] R2 클라우드 스토리지 객체 삭제
-          if (photo.photo_url) {
-            deleteFromR2(photo.photo_url).catch(err => console.error('R2 원본 삭제 오류:', err));
-          }
-        } catch (fileError) {
-          console.error(`원본 파일 삭제 실패: ${photo.photo_url}`, fileError);
+        // [한글 코멘트] 로컬 디스크 삭제 대신 R2 클라우드 스토리지 객체 전용 삭제 수행
+        if (photo.photo_url) {
+          deleteFromR2(photo.photo_url).catch(err => console.error('❌ R2 원본 삭제 오류:', err));
         }
-
-        // 썸네일 이미지 삭제 (로컬 디스크 및 R2 클라우드 동시 삭제)
         if (photo.thumbnail_url) {
-          try {
-            const thumbnailPath = getThumbnailFilePathFromUrl(photo.thumbnail_url);
-            if (thumbnailPath && fs.existsSync(thumbnailPath)) {
-              fs.unlinkSync(thumbnailPath);
-              console.log(`썸네일 파일 삭제 성공: ${thumbnailPath}`);
-            }
-            // [한글 코멘트] R2 클라우드 스토리지 썸네일 객체 삭제
-            deleteFromR2(photo.thumbnail_url).catch(err => console.error('R2 썸네일 삭제 오류:', err));
-          } catch (fileError) {
-            console.error(`썸네일 파일 삭제 실패: ${photo.thumbnail_url}`, fileError);
-          }
+          deleteFromR2(photo.thumbnail_url).catch(err => console.error('❌ R2 썸네일 삭제 오류:', err));
         }
       });
 
@@ -376,35 +309,15 @@ router.delete('/:id',
       // 앨범 삭제 (soft delete)
       await pool.query('UPDATE albums SET is_deleted = TRUE WHERE album_id = ?', [id]);
 
-      // 물리적 파일 삭제 (원본과 썸네일 모두)
+      // R2 클라우드 파일 삭제 (원본과 썸네일 모두)
       if (photos.length > 0) {
         photos.forEach(photo => {
-          // 원본 이미지 삭제 (로컬 디스크 및 R2 클라우드 동시 삭제)
-          try {
-            const filePath = getAlbumFilePathFromUrl(photo.photo_url);
-            if (filePath && fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-              console.log(`원본 파일 삭제 성공: ${filePath}`);
-            }
-            if (photo.photo_url) {
-              deleteFromR2(photo.photo_url).catch(err => console.error('R2 원본 삭제 오류:', err));
-            }
-          } catch (fileError) {
-            console.error(`원본 파일 삭제 실패: ${photo.photo_url}`, fileError);
+          // [한글 코멘트] Cloudflare R2 원본 및 썸네일 이미지 삭제
+          if (photo.photo_url) {
+            deleteFromR2(photo.photo_url).catch(err => console.error('❌ R2 원본 삭제 오류:', err));
           }
-
-          // 썸네일 이미지 삭제 (로컬 디스크 및 R2 클라우드 동시 삭제)
           if (photo.thumbnail_url) {
-            try {
-              const thumbnailPath = getThumbnailFilePathFromUrl(photo.thumbnail_url);
-              if (thumbnailPath && fs.existsSync(thumbnailPath)) {
-                fs.unlinkSync(thumbnailPath);
-                console.log(`썸네일 파일 삭제 성공: ${thumbnailPath}`);
-              }
-              deleteFromR2(photo.thumbnail_url).catch(err => console.error('R2 썸네일 삭제 오류:', err));
-            } catch (fileError) {
-              console.error(`썸네일 파일 삭제 실패: ${photo.thumbnail_url}`, fileError);
-            }
+            deleteFromR2(photo.thumbnail_url).catch(err => console.error('❌ R2 썸네일 삭제 오류:', err));
           }
         });
       }
@@ -431,14 +344,12 @@ router.get('/',
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const { page = 1, limit = 12 } = req.query;
+      // [한글 코멘트] 사용자 요청: 앨범 실시간 검색 기능 지원 (search 파라미터)
+      const { page = 1, limit = 12, search } = req.query;
       const offset = (page - 1) * limit;
 
       const pool = getPool();
-      // 각 앨범의 첫 번째 사진의 썸네일을 가져오기 (썸네일이 없으면 원본 사용)
-      // photo_order가 있으면 그것을 우선하고, 없으면 photo_id로 정렬
-      const [albums] = await pool.query(
-        `SELECT 
+      let sql = `SELECT 
           a.album_id, a.title, a.description, a.author_id, a.author_name, a.view_count, a.created_at,
           (SELECT COALESCE(ap.thumbnail_url, ap.photo_url)
            FROM album_photos ap 
@@ -451,23 +362,30 @@ router.get('/',
            FROM album_photos ap 
            WHERE ap.album_id = a.album_id) as photo_count
         FROM albums a
-        WHERE a.is_deleted = FALSE
-        ORDER BY a.created_at DESC
-        LIMIT ? OFFSET ?`,
-        [parseInt(limit), parseInt(offset)]
-      );
+        WHERE a.is_deleted = FALSE`;
 
-      // 디버깅: 각 앨범의 썸네일 확인
-      console.log('[앨범 목록] 썸네일 확인:', albums.map(a => ({
-        id: a.album_id,
-        title: a.title,
-        thumbnail: a.thumbnail
-      })));
+      const params = [];
+      if (search && typeof search === 'string' && search.trim() !== '') {
+        const keyword = `%${search.trim()}%`;
+        sql += ' AND (a.title LIKE ? OR a.description LIKE ?)';
+        params.push(keyword, keyword);
+      }
 
-      // 전체 앨범 수 조회
-      const [countResult] = await pool.query(
-        'SELECT COUNT(*) as total FROM albums WHERE is_deleted = FALSE'
-      );
+      sql += ' ORDER BY a.created_at DESC LIMIT ? OFFSET ?';
+      params.push(parseInt(limit), parseInt(offset));
+
+      const [albums] = await pool.query(sql, params);
+
+      // 전체 앨범 수 조회 (검색어 조건 포함)
+      let countSql = 'SELECT COUNT(*) as total FROM albums a WHERE a.is_deleted = FALSE';
+      const countParams = [];
+      if (search && typeof search === 'string' && search.trim() !== '') {
+        const keyword = `%${search.trim()}%`;
+        countSql += ' AND (a.title LIKE ? OR a.description LIKE ?)';
+        countParams.push(keyword, keyword);
+      }
+
+      const [countResult] = await pool.query(countSql, countParams);
       const total = countResult[0].total;
 
       res.json({

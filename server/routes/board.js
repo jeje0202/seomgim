@@ -19,13 +19,8 @@ const processBase64Images = async (htmlContent) => {
   let processedContent = htmlContent;
 
   const projectRoot = path.resolve(__dirname, '..', '..');
-  const pastedDir = path.join(projectRoot, 'data', 'board', 'pasted');
-
-  if (!fs.existsSync(pastedDir)) {
-    fs.mkdirSync(pastedDir, { recursive: true });
-  }
-
-  const MAX_BYTES = 10 * 1024 * 1024; // 10MB 용량 한도
+  // [한글 코멘트] 사용자 요청: 본문 이미지 붙여넣기 1개당 최대 용량 5MB 제한 및 초과 시 자동 리사이징/압축
+  const MAX_BYTES = 5 * 1024 * 1024; // 5MB 용량 한도
 
   while ((match = base64Regex.exec(htmlContent)) !== null) {
     const fullDataUri = match[1];
@@ -37,15 +32,14 @@ const processBase64Images = async (htmlContent) => {
       let buffer = Buffer.from(base64Data, 'base64');
       const ext = imageType === 'png' ? 'png' : 'jpg';
       const fileName = `pasted_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-      const filePath = path.join(pastedDir, fileName);
 
-      // [한글 코멘트] 사용자 요청: 붙여넣기한 이미지 용량이 10MB를 초과하거나 고용량인 경우 Sharp로 10MB 이하 및 1920px 해상도로 자동 리사이징/압축
-      if (buffer.length > MAX_BYTES || buffer.length > 2 * 1024 * 1024) {
+      // [한글 코멘트] 붙여넣은 이미지 용량이 5MB 초과 또는 고용량인 경우 Sharp로 1920px 해상도로 자동 리사이징/압축
+      if (buffer.length > MAX_BYTES || buffer.length > 1.5 * 1024 * 1024) {
         try {
-          console.log(`📸 붙여넣은 이미지 용량(${Math.round(buffer.length / 1024 / 1024)}MB) 감지: 10MB 이하 자동 리사이징/압축 진행 중...`);
+          console.log(`📸 붙여넣은 이미지 용량(${Math.round(buffer.length / 1024 / 1024)}MB) 감지: 5MB 한도에 맞춘 자동 리사이징/압축 진행 중...`);
           const compressedBuffer = await sharp(buffer)
             .resize({ width: 1920, height: 1920, fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 82, progressive: true })
+            .jpeg({ quality: 80, progressive: true })
             .toBuffer();
 
           if (compressedBuffer && compressedBuffer.length > 0) {
@@ -53,20 +47,15 @@ const processBase64Images = async (htmlContent) => {
             console.log(`✅ 이미지 압축 완료: ${Math.round(buffer.length / 1024)}KB`);
           }
         } catch (sharpError) {
-          console.error('⚠️ Sharp 이미지 압축 실패, 원본 버퍼 저장 진행:', sharpError.message);
+          console.error('⚠️ Sharp 이미지 압축 실패, 원본 버퍼 사용:', sharpError.message);
         }
       }
 
-      await fs.promises.writeFile(filePath, buffer);
-
-      // [한글 코멘트] R2 클라우드 스토리지 동기화 업로드
+      // [한글 코멘트] 로컬 디스크 파일 쓰기를 하지 않고 Cloudflare R2 스토리지로 전용 업로드
       const { uploadToR2 } = require('../utils/r2Storage');
-      try {
-        const r2Key = `uploads/board/pasted/${fileName}`;
-        await uploadToR2(buffer, r2Key);
-      } catch (r2Err) {
-        console.error('⚠️ 붙여넣기 이미지 R2 업로드 오류:', r2Err.message);
-      }
+      const r2Key = `uploads/board/pasted/${fileName}`;
+      const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      await uploadToR2(buffer, r2Key, mimeType);
 
       const fileUrl = `/uploads/board/pasted/${fileName}`;
       processedContent = processedContent.replace(fullDataUri, fileUrl);
@@ -293,7 +282,8 @@ router.get('/posts',
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const { category_id, page = 1, limit = 20, tag } = req.query;
+      // [한글 코멘트] 사용자 요청: 게시판 실시간 검색 기능 지원 (search 파라미터)
+      const { category_id, page = 1, limit = 20, tag, search } = req.query;
       const offset = (page - 1) * limit;
 
       // 태그 필터링: 배열 또는 쉼표로 구분된 문자열 처리
@@ -338,6 +328,13 @@ router.get('/posts',
       if (category_id) {
         query += ' AND p.category_id = ?';
         params.push(category_id);
+      }
+
+      // [한글 코멘트] 게시글 제목, 본문 내용, 작성자 이름 검색 조건 추가
+      if (search && typeof search === 'string' && search.trim() !== '') {
+        const keyword = `%${search.trim()}%`;
+        query += ' AND (p.title LIKE ? OR p.content LIKE ? OR p.author_name LIKE ?)';
+        params.push(keyword, keyword, keyword);
       }
 
       query += ' ORDER BY p.is_notice DESC, p.created_at DESC LIMIT ? OFFSET ?';
@@ -418,6 +415,14 @@ router.get('/posts',
         countQuery += ' AND p.category_id = ?';
         countParams.push(category_id);
       }
+
+      // [한글 코멘트] 전체 건수 계산 시에도 검색 파라미터 조건 동일 적용
+      if (search && typeof search === 'string' && search.trim() !== '') {
+        const keyword = `%${search.trim()}%`;
+        countQuery += ' AND (p.title LIKE ? OR p.content LIKE ? OR p.author_name LIKE ?)';
+        countParams.push(keyword, keyword, keyword);
+      }
+
       const [countResult] = await pool.query(countQuery, countParams);
 
       res.json({
@@ -929,28 +934,13 @@ router.delete('/posts/:id',
               let filePath = null;
               
               // 게시판 이미지 경로인지 확인
-              if (imageUrl.startsWith('/uploads/board/')) {
-                filePath = getBoardFilePathFromUrl(imageUrl);
-              } else if (imageUrl.startsWith('/uploads/thumbnail/')) {
-                // 썸네일 경로
-                filePath = getThumbnailFilePathFromUrl(imageUrl);
-              } else if (imageUrl.startsWith('/uploads/')) {
-                // 기존 경로 형식 (하위 호환성)
-                filePath = getBoardFilePathFromUrl(imageUrl);
-              }
-              
-              if (filePath && fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-                console.log(`[게시글 삭제] ✅ 로컬 이미지 파일 삭제 성공: ${filePath}`);
-              }
-              // [한글 코멘트] R2 클라우드 스토리지 객체 삭제
+              // [한글 코멘트] 로컬 디스크 파일 삭제 대신 Cloudflare R2 클라우드 스토리지 전용 삭제 수행
               if (imageUrl) {
                 const { deleteFromR2 } = require('../utils/r2Storage');
-                deleteFromR2(imageUrl).catch(err => console.error('[게시글 삭제] R2 삭제 오류:', err));
+                deleteFromR2(imageUrl).catch(err => console.error('[게시글 삭제] ❌ R2 삭제 오류:', err));
               }
             } catch (fileError) {
-              console.error(`[게시글 삭제] ❌ 이미지 파일 삭제 실패: ${imageUrl}`, fileError);
-              // 파일 삭제 실패해도 게시글 삭제는 계속 진행
+              console.error(`[게시글 삭제] ❌ 이미지 삭제 처리 중 오류: ${imageUrl}`, fileError);
             }
           });
         } catch (error) {

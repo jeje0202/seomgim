@@ -117,12 +117,13 @@ export const getCategories = async (): Promise<BoardCategory[]> => {
   }
 };
 
-// 게시글 목록 조회
+// [한글 코멘트] 사용자 요청: 게시글 목록 실시간 검색 파라미터(search) 지원 추가
 export const getPosts = async (
   categoryId?: number,
   page: number = 1,
   limit: number = 20,
-  tags?: string[] // 태그 필터링 파라미터 (배열)
+  tags?: string[], // 태그 필터링 파라미터 (배열)
+  search?: string // 검색 키워드
 ): Promise<{ posts: Post[]; pagination: any }> => {
   try {
     const params = new URLSearchParams();
@@ -132,6 +133,9 @@ export const getPosts = async (
     // 여러 태그를 쉼표로 구분하여 전달
     if (tags && tags.length > 0) {
       params.append('tag', tags.join(','));
+    }
+    if (search && search.trim() !== '') {
+      params.append('search', search.trim());
     }
     
     const token = getToken();

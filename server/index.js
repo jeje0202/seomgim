@@ -1,4 +1,7 @@
-// 창원섬김의교회 게시판 백엔드 서버
+// [한글 코멘트] 시스템 기본 경로 및 파일 처리를 위한 path, fs 모듈 불러오기
+const path = require('path');
+const fs = require('fs');
+
 const express = require('express');
 const cors = require('cors');
 const { initializeDatabase } = require('./db');
@@ -42,155 +45,42 @@ app.use(express.urlencoded({ extended: true, limit: '200mb' }));
 app.set('trust proxy', true);
 
 // 정적 파일 서빙 (업로드된 이미지)  
-const path = require('path');
-const fs = require('fs');
-
 // 절대 경로로 설정 (Windows 호환성 보장)
 const projectRoot = path.resolve(__dirname, '..');
+
 const albumDir = path.join(projectRoot, 'data', 'album');
-const dataDir = path.join(projectRoot, 'data');
 const boardDir = path.join(projectRoot, 'data', 'board');
-
-console.log('=== 정적 파일 서빙 설정 ===');
-console.log(`프로젝트 루트: ${projectRoot}`);
-console.log(`앨범 디렉토리: ${albumDir}`);
-console.log(`데이터 디렉토리: ${dataDir}`);
-
-// 앨범 이미지 서빙 (data/album 폴더 및 하위 폴더들) - 더 구체적인 경로를 먼저 설정
-if (fs.existsSync(albumDir)) {
-  // 기본 앨범 폴더 서빙
-  app.use('/uploads/album', express.static(albumDir));
-  console.log(`✅ 앨범 이미지 서빙 설정 완료: ${albumDir}`);
-  
-  // 하위 폴더들 (album1, album2...) 서빙
-  try {
-    const files = fs.readdirSync(albumDir);
-    const subDirs = files.filter(file => {
-      const filePath = path.join(albumDir, file);
-      return fs.statSync(filePath).isDirectory() && file.startsWith('album');
-    });
-    
-    subDirs.forEach(subDir => {
-      const subDirPath = path.join(albumDir, subDir);
-      app.use(`/uploads/album/${subDir}`, express.static(subDirPath));
-      console.log(`✅ 앨범 하위 폴더 서빙 설정: ${subDirPath}`);
-    });
-    
-    const fileCount = files.filter(file => {
-      const filePath = path.join(albumDir, file);
-      return fs.statSync(filePath).isFile();
-    }).length;
-    console.log(`   기본 폴더 파일 수: ${fileCount}개`);
-  } catch (err) {
-    console.error(`❌ 앨범 폴더 확인 오류:`, err);
-  }
-} else {
-  console.error(`❌ 앨범 디렉토리가 없습니다: ${albumDir}`);
-  // 디렉토리 생성 시도
-  try {
-    fs.mkdirSync(albumDir, { recursive: true });
-    console.log(`✅ 앨범 디렉토리 생성됨: ${albumDir}`);
-    app.use('/uploads/album', express.static(albumDir));
-  } catch (err) {
-    console.error(`❌ 앨범 디렉토리 생성 실패:`, err);
-  }
-}
-
-// 썸네일 이미지 서빙 (data/thumbnail 폴더 및 하위 폴더들)
+const dataDir = path.join(projectRoot, 'data');
 const thumbnailBaseDir = path.join(projectRoot, 'data', 'thumbnail');
-if (fs.existsSync(thumbnailBaseDir)) {
-  // 기본 썸네일 폴더 서빙
-  app.use('/uploads/thumbnail', express.static(thumbnailBaseDir));
-  console.log(`✅ 썸네일 이미지 서빙 설정 완료: ${thumbnailBaseDir}`);
-  
-  // 하위 폴더들 (년월별) 서빙
-  try {
-    const files = fs.readdirSync(thumbnailBaseDir);
-    const subDirs = files.filter(file => {
-      const filePath = path.join(thumbnailBaseDir, file);
-      return fs.statSync(filePath).isDirectory();
-    });
-    
-    subDirs.forEach(subDir => {
-      const subDirPath = path.join(thumbnailBaseDir, subDir);
-      app.use(`/uploads/thumbnail/${subDir}`, express.static(subDirPath));
-      console.log(`✅ 썸네일 하위 폴더 서빙 설정: ${subDirPath}`);
-    });
-  } catch (err) {
-    console.error(`❌ 썸네일 폴더 확인 오류:`, err);
-  }
-} else {
-  console.log(`ℹ️ 썸네일 디렉토리가 없습니다. 필요시 자동 생성됩니다: ${thumbnailBaseDir}`);
-}
+const newsDir = path.join(projectRoot, 'data', 'news');
 
-// 게시판별 이미지 서빙 (data/board 폴더 및 하위 폴더들)
+// [한글 코멘트] Cloudflare R2 클라우드 스토리지 전용 업로드 모드 설정 및 기존 로컬 캐시 서빙 지원
+console.log('=== 스토리지 서빙 설정 (Cloudflare R2 클라우드 직접 연동 모드) ===');
+console.log(`프로젝트 루트: ${projectRoot}`);
+
+// 기존 로컬 파일이 디스크에 남아있는 경우에 대한 백업 정적 서빙 설정
+if (fs.existsSync(albumDir)) {
+  app.use('/uploads/album', express.static(albumDir));
+}
+if (fs.existsSync(thumbnailBaseDir)) {
+  app.use('/uploads/thumbnail', express.static(thumbnailBaseDir));
+}
 if (fs.existsSync(boardDir)) {
-  // 게시판별 하위 폴더 서빙 (pasted 붙여넣기 이미지 서빙 추가)
   const boardSubDirs = ['jubo', 'normal', 'part', 'notice', 'pasted'];
   boardSubDirs.forEach(subDir => {
     const subDirPath = path.join(boardDir, subDir);
     if (fs.existsSync(subDirPath)) {
       app.use(`/uploads/board/${subDir}`, express.static(subDirPath));
-      console.log(`✅ 게시판 이미지 서빙 설정: ${subDirPath} -> /uploads/board/${subDir}`);
-    } else {
-      // 디렉토리가 없으면 생성
-      try {
-        fs.mkdirSync(subDirPath, { recursive: true });
-        app.use(`/uploads/board/${subDir}`, express.static(subDirPath));
-        console.log(`✅ 게시판 디렉토리 생성 및 서빙 설정: ${subDirPath}`);
-      } catch (err) {
-        console.error(`❌ 게시판 디렉토리 생성 실패 (${subDir}):`, err);
-      }
     }
   });
-} else {
-  console.error(`❌ 게시판 디렉토리가 없습니다: ${boardDir}`);
-  // 디렉토리 생성 시도
-  try {
-    fs.mkdirSync(boardDir, { recursive: true });
-    console.log(`✅ 게시판 디렉토리 생성됨: ${boardDir}`);
-    // 하위 폴더들도 생성
-    const boardSubDirs = ['jubo', 'normal', 'part', 'notice', 'pasted'];
-    boardSubDirs.forEach(subDir => {
-      const subDirPath = path.join(boardDir, subDir);
-      fs.mkdirSync(subDirPath, { recursive: true });
-      app.use(`/uploads/board/${subDir}`, express.static(subDirPath));
-      console.log(`✅ 게시판 하위 디렉토리 생성 및 서빙 설정: ${subDirPath}`);
-    });
-  } catch (err) {
-    console.error(`❌ 게시판 디렉토리 생성 실패:`, err);
-  }
 }
-
-// 교회소식 이미지 서빙 (data/news 폴더)
-const newsDir = path.join(projectRoot, 'data', 'news');
 if (fs.existsSync(newsDir)) {
   app.use('/uploads/news', express.static(newsDir));
-  console.log(`✅ 교회소식 이미지 서빙 설정: ${newsDir} -> /uploads/news`);
-} else {
-  try {
-    fs.mkdirSync(newsDir, { recursive: true });
-    app.use('/uploads/news', express.static(newsDir));
-    console.log(`✅ 교회소식 디렉토리 생성 및 서빙 설정: ${newsDir}`);
-  } catch (err) {
-    console.error(`❌ 교회소식 디렉토리 생성 실패:`, err);
-  }
 }
-
-// 기타 업로드 파일 서빙
 if (fs.existsSync(dataDir)) {
   app.use('/uploads', express.static(dataDir));
-  console.log(`✅ 업로드 파일 서빙 설정 완료: ${dataDir}`);
-} else {
-  console.error(`❌ 데이터 디렉토리가 없습니다: ${dataDir}`);
-  try {
-    fs.mkdirSync(dataDir, { recursive: true });
-    console.log(`✅ 데이터 디렉토리 생성됨: ${dataDir}`);
-    app.use('/uploads', express.static(dataDir));
-  } catch (err) {
-    console.error(`❌ 데이터 디렉토리 생성 실패:`, err);
-  }
 }
+console.log('✅ Cloudflare R2 스토리지 활성화 (신규 업로드 파일 디스크 저장 전면 차단 완료)');
 
 // [한글 코멘트] R2 클라우드 폴백 미들웨어: 로컬 디스크에 파일이 없거나 향후 로컬 파일 삭제 후에도 Cloudflare R2에서 즉시 내려 받아 서빙
 const { getObjectFromR2, getMimeType } = require('./utils/r2Storage');

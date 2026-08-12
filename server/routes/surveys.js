@@ -317,14 +317,17 @@ router.put('/:id',
     param('id').isInt(),
     body('title').trim().isLength({ min: 1, max: 200 }),
     body('description').optional(),
+    // [한글 코멘트] 사용자 요청: 설문조사 수정 시 날짜 null/빈값 유효성 검사 및 validation 에러 세부 메시지 보완
+    body('title').optional().trim().notEmpty().withMessage('제목을 입력해 주세요.'),
+    body('description').optional(),
     body('is_active').optional().isBoolean(),
     body('is_anonymous').optional().isBoolean(),
     body('target_type').optional().isIn(['anyone', 'authenticated', 'authenticated_anonymous']),
-    body('start_date').optional().isISO8601(),
-    body('end_date').optional().isISO8601(),
+    body('start_date').optional({ nullable: true, checkFalsy: true }),
+    body('end_date').optional({ nullable: true, checkFalsy: true }),
     body('end_condition_type').optional().isIn(['date', 'count', 'percentage']),
-    body('end_count').optional().isInt({ min: 1 }),
-    body('end_percentage').optional().isFloat({ min: 0, max: 100 })
+    body('end_count').optional({ nullable: true, checkFalsy: true }),
+    body('end_percentage').optional({ nullable: true, checkFalsy: true })
   ],
   authenticate,
   authorize('admin', 'super-admin'),
@@ -332,7 +335,8 @@ router.put('/:id',
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({ success: false, errors: errors.array() });
+        const errorMsg = errors.array().map(e => e.msg).join(', ');
+        return res.status(400).json({ success: false, message: errorMsg, errors: errors.array() });
       }
 
       const { id } = req.params;
@@ -356,7 +360,7 @@ router.put('/:id',
         return res.status(404).json({ success: false, message: '설문조사를 찾을 수 없습니다.' });
       }
 
-      // 작성자 또는 관리자 확인
+      // 작성자 또는 관리자 확인 (최고관리자 super-admin 포함)
       const isAuthor = surveys[0].author_id === req.user.user_id;
       const isAdmin = req.user.role === 'admin' || req.user.role === 'super-admin';
       if (!isAuthor && !isAdmin) {
@@ -370,9 +374,22 @@ router.put('/:id',
       if (end_condition_type === 'percentage' && (!end_percentage || end_percentage <= 0 || end_percentage > 100)) {
         return res.status(400).json({ success: false, message: '비율 기반 종료를 선택한 경우 종료 비율을 입력해주세요. (0-100%)' });
       }
-      if (end_condition_type === 'date' && (!start_date || !end_date)) {
-        return res.status(400).json({ success: false, message: '기간 기반 종료를 선택한 경우 시작일과 종료일을 입력해주세요.' });
-      }
+
+      // [한글 코멘트] MariaDB DATETIME 형식 안전 변환 함수
+      const formatDbDateTime = (dateVal) => {
+        if (!dateVal || dateVal === '' || dateVal === 'null') return null;
+        try {
+          const d = new Date(dateVal);
+          if (isNaN(d.getTime())) return null;
+          const pad = (n) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        } catch (e) {
+          return null;
+        }
+      };
+
+      const formattedStartDate = formatDbDateTime(start_date);
+      const formattedEndDate = formatDbDateTime(end_date);
 
       await pool.query(`
         UPDATE surveys 
@@ -386,8 +403,8 @@ router.put('/:id',
         is_active !== undefined ? is_active : true, 
         is_anonymous || false,
         target_type || 'anyone',
-        start_date || null, 
-        end_date || null,
+        formattedStartDate, 
+        formattedEndDate,
         end_condition_type || 'date',
         end_count || null,
         end_percentage || null,

@@ -1,97 +1,15 @@
-// 이미지 업로드 API 라우터
+// [파일 용도] 이미지 업로드 API 라우터 (Cloudflare R2 클라우드 스토리지 전용)
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 
-// 파일 저장 유틸리티 import
+// 파일 저장 유틸리티 및 R2 연동 모듈 import
 const { getThumbnailStoragePath, getThumbnailUrl } = require('../utils/fileStorage');
+const { uploadToR2 } = require('../utils/r2Storage');
 
-// data 디렉토리 생성 (없는 경우)
-// 프로젝트 루트의 data 폴더에 저장
-const uploadsDir = path.join(__dirname, '../../data');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// 썸네일 기본 디렉토리 생성 (없는 경우)
-const thumbnailBaseDir = path.join(__dirname, '../../data/thumbnail');
-if (!fs.existsSync(thumbnailBaseDir)) {
-  fs.mkdirSync(thumbnailBaseDir, { recursive: true });
-}
-
-// 게시판별 이미지 저장 경로 설정
-const getBoardImagePath = (categoryCode) => {
-  // 교회소식은 별도 경로 사용
-  if (categoryCode === 'news') {
-    const newsDir = path.join(__dirname, '../../data/news');
-    if (!fs.existsSync(newsDir)) {
-      fs.mkdirSync(newsDir, { recursive: true });
-    }
-    return newsDir;
-  }
-
-  const boardBaseDir = path.join(__dirname, '../../data/board');
-
-  // 게시판별 하위 디렉토리 매핑
-  const boardPathMap = {
-    'bulletin': 'jubo',      // 주보게시판
-    'member': 'normal',      // 성도게시판
-    'organization': 'part',  // 기관게시판
-    'notice': 'notice'       // 공지사항 게시판
-  };
-
-  // 카테고리 코드에 따라 경로 결정 (기본값: bulletin)
-  const subDir = boardPathMap[categoryCode] || 'jubo';
-  const boardDir = path.join(boardBaseDir, subDir);
-
-  // 디렉토리가 없으면 생성
-  if (!fs.existsSync(boardDir)) {
-    fs.mkdirSync(boardDir, { recursive: true });
-  }
-
-  return boardDir;
-};
-
-// multer 설정 (필드명과 카테고리에 따라 다른 저장 경로 사용)
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // 필드명에 따라 다른 저장 경로 결정
-    if (file.fieldname === 'thumbnail') {
-      // 썸네일: 년월별 폴더
-      const storagePath = getThumbnailStoragePath();
-      if (!req.thumbnailStoragePath) req.thumbnailStoragePath = storagePath;
-      cb(null, storagePath);
-    } else {
-      // 원본 이미지: 게시판별 경로
-      // 요청에서 카테고리 코드 가져오기 (쿼리 파라미터 또는 body에서)
-      const categoryCode = req.query.category_code || req.body.category_code || 'bulletin';
-      const boardDir = getBoardImagePath(categoryCode);
-      cb(null, boardDir);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-
-    if (file.fieldname === 'thumbnail') {
-      cb(null, `thumb-${uniqueSuffix}${ext}`);
-    } else {
-      // 게시판별 파일명 접두사
-      const categoryCode = req.query.category_code || req.body.category_code || 'bulletin';
-      const prefixMap = {
-        'bulletin': 'jubo',
-        'member': 'normal',
-        'organization': 'part',
-        'notice': 'notice',
-        'news': 'news'
-      };
-      const prefix = prefixMap[categoryCode] || 'jubo';
-      cb(null, `${prefix}-${uniqueSuffix}${ext}`);
-    }
-  }
-});
+// [한글 코멘트] 로컬 디스크 저장 대신 multer.memoryStorage()를 사용하여 메모리 버퍼로 수신
+const storage = multer.memoryStorage();
 
 // 파일 필터 (이미지만 허용)
 const fileFilter = (req, file, cb) => {
@@ -106,21 +24,22 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
+// [한글 코멘트] 사용자 요청: 이미지 개별 파일 최대 상한을 5MB로 설정
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB 제한
+    fileSize: 5 * 1024 * 1024 // 5MB 제한
   },
   fileFilter: fileFilter
 });
 
-// 이미지 업로드 (원본 이미지와 썸네일 모두 받기)
+// 이미지 업로드 (원본 이미지와 썸네일 모두 받기 - R2 클라우드 직접 업로드)
 router.post('/image',
   upload.fields([
     { name: 'image', maxCount: 1 },
     { name: 'thumbnail', maxCount: 1 }
   ]),
-  (req, res) => {
+  async (req, res) => {
     try {
       const imageFile = req.files && req.files['image'] ? req.files['image'][0] : null;
       const thumbnailFile = req.files && req.files['thumbnail'] ? req.files['thumbnail'][0] : null;
@@ -134,12 +53,24 @@ router.post('/image',
 
       // 카테고리 코드 가져오기 (쿼리 파라미터 또는 body에서)
       const categoryCode = req.query.category_code || req.body.category_code || 'bulletin';
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+
+      // 게시판별 파일명 접두사 설정
+      const prefixMap = {
+        'bulletin': 'jubo',
+        'member': 'normal',
+        'organization': 'part',
+        'notice': 'notice',
+        'news': 'news'
+      };
+      const prefix = prefixMap[categoryCode] || 'jubo';
+      const ext = path.extname(imageFile.originalname).toLowerCase() || '.jpg';
+      const imageFilename = `${prefix}-${uniqueSuffix}${ext}`;
 
       // 게시판별 URL 경로 설정
       let imageUrl;
       if (categoryCode === 'news') {
-        // 교회소식은 별도 경로
-        imageUrl = `/uploads/news/${imageFile.filename}`;
+        imageUrl = `/uploads/news/${imageFilename}`;
       } else {
         const boardPathMap = {
           'bulletin': 'jubo',
@@ -148,37 +79,37 @@ router.post('/image',
           'notice': 'notice'
         };
         const boardSubPath = boardPathMap[categoryCode] || 'jubo';
-        imageUrl = `/uploads/board/${boardSubPath}/${imageFile.filename}`;
+        imageUrl = `/uploads/board/${boardSubPath}/${imageFilename}`;
       }
 
-      // 썸네일 URL 생성 (있는 경우)
-      const thumbnailStoragePath = req.thumbnailStoragePath || getThumbnailStoragePath();
-      const thumbnailUrl = thumbnailFile ? getThumbnailUrl(thumbnailFile.filename, thumbnailStoragePath) : null;
+      // [한글 코멘트] R2 클라우드 스토리지로 원본 이미지 직접 업로드
+      const imageR2Key = `uploads/${imageUrl.replace(/^\/uploads\//, '')}`;
+      await uploadToR2(imageFile.buffer, imageR2Key, imageFile.mimetype);
 
-      // [한글 코멘트] R2 클라우드 스토리지 자동 동기화 업로드
-      const { uploadToR2 } = require('../utils/r2Storage');
-      (async () => {
-        try {
-          if (imageFile && imageFile.path) {
-            const r2Key = `uploads/${imageUrl.replace(/^\/uploads\//, '')}`;
-            await uploadToR2(imageFile.path, r2Key);
-          }
-          if (thumbnailFile && thumbnailFile.path && thumbnailUrl) {
-            const thumbR2Key = `uploads/${thumbnailUrl.replace(/^\/uploads\//, '')}`;
-            await uploadToR2(thumbnailFile.path, thumbR2Key);
-          }
-        } catch (r2Err) {
-          console.error('⚠️ R2 이미지 업로드 오류:', r2Err.message);
-        }
-      })();
+      // 썸네일 업로드 및 URL 생성 (있는 경우)
+      let thumbnailUrl = null;
+      let thumbFilename = null;
+
+      if (thumbnailFile) {
+        const thumbExt = path.extname(thumbnailFile.originalname).toLowerCase() || '.jpg';
+        thumbFilename = `thumb-${uniqueSuffix}${thumbExt}`;
+        const thumbnailStoragePath = getThumbnailStoragePath();
+        thumbnailUrl = getThumbnailUrl(thumbFilename, thumbnailStoragePath);
+
+        // [한글 코멘트] R2 클라우드 스토리지로 썸네일 직접 업로드
+        const thumbR2Key = `uploads/${thumbnailUrl.replace(/^\/uploads\//, '')}`;
+        await uploadToR2(thumbnailFile.buffer, thumbR2Key, thumbnailFile.mimetype);
+      }
+
+      console.log(`[이미지 업로드] Cloudflare R2 직접 업로드 완료: ${imageUrl}`);
 
       res.json({
         success: true,
         data: {
           url: imageUrl,
-          filename: imageFile.filename,
+          filename: imageFilename,
           thumbnailUrl: thumbnailUrl,
-          thumbnailFilename: thumbnailFile ? thumbnailFile.filename : null
+          thumbnailFilename: thumbFilename
         },
         message: '이미지가 업로드되었습니다.'
       });

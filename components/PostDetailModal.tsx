@@ -757,13 +757,14 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
         />
       )}
 
-      {/* [한글 코멘트] 카카오톡 스타일 이미지 뷰어 모달 */}
+      {/* [한글 코멘트] 사용자 요청: 하드코딩된 [주보] 제거 및 실제 게시판 카테고리 이름([카테고리명] 제목) 동적 반영 */}
       <ImageViewerModal
         isOpen={showImageViewer}
         onClose={() => setShowImageViewer(false)}
         images={imageViewerImages}
         initialIndex={imageViewerIndex}
-        title={post?.title ? `[주보] ${post.title}` : '주보 및 이미지 크게보기'}
+        title={post?.title ? (post.category_name ? `[${post.category_name}] ${post.title}` : post.title) : '이미지 크게보기'}
+        unit={post?.category_code === 'bulletin' ? '면' : '장'}
       />
     </>
   );

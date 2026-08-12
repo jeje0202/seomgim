@@ -1,6 +1,7 @@
 // 사진첩 섹션 컴포넌트
+// [한글 코멘트] React 훅(useState, useEffect) 및 페이징 네비게이션 아이콘 모듈 불러오기
 import React, { useState, useEffect } from 'react';
-import { Camera, PlusCircle, Trash2, Edit2, Eye, Calendar, User, X, RotateCw } from 'lucide-react';
+import { Camera, PlusCircle, Trash2, Edit2, Eye, Calendar, User, X, RotateCw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Search } from 'lucide-react';
 import { getAlbums, getAlbumDetail, deleteAlbum, createAlbum, updateAlbum, uploadPhotos, Album, AlbumDetail } from '../services/albumApi';
 import { getUserInfo, hasRole, User as UserType } from '../services/authApi';
 import AlertModal from './AlertModal';
@@ -20,34 +21,53 @@ const AlbumSection: React.FC = () => {
   const [editingAlbum, setEditingAlbum] = useState<AlbumDetail | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
+  // [한글 코멘트] 사용자 요청: 앨범 실시간 디바운스(300ms) 검색을 위한 상태
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [imageViewerImages, setImageViewerImages] = useState<string[]>([]);
   const [imageViewerIndex, setImageViewerIndex] = useState(0);
+
+  // [한글 코멘트] 사용자 요청: 페이지네이션 클릭 시 앨범 목록 상단 자동 스크롤을 위한 Ref
+  const sectionTopRef = React.useRef<HTMLDivElement>(null);
+  const isFirstRender = React.useRef(true);
 
   useEffect(() => {
     loadAlbums();
     const userInfo = getUserInfo();
     setUser(userInfo);
-  }, [currentPage]);
+
+    // [한글 코멘트] 페이징 버튼 클릭으로 페이지 전환 시 앨범 목록 상단으로 부드럽게 스크롤 이동
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+    } else {
+      if (sectionTopRef.current) {
+        sectionTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }, [currentPage, debouncedSearch]);
 
   const loadAlbums = async () => {
     setLoading(true);
     try {
-      console.log('앨범 목록 로드 시작...', { page: currentPage });
-      const data = await getAlbums({ page: currentPage, limit: 12 });
+      console.log('앨범 목록 로드 시작...', { page: currentPage, search: debouncedSearch });
+      const data = await getAlbums({ page: currentPage, limit: 12, search: debouncedSearch });
       console.log('앨범 목록 로드 성공:', {
         albumsCount: data.albums.length,
-        totalPages: data.pagination.totalPages,
-        albums: data.albums.map(a => ({ id: a.album_id, title: a.title, thumbnail: a.thumbnail }))
+        totalPages: data.pagination.totalPages
       });
       setAlbums(data.albums);
       setTotalPages(data.pagination.totalPages);
     } catch (error) {
       console.error('앨범 목록 로드 오류:', error);
-      console.error('에러 상세:', {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
       setAlbums([]);
     } finally {
       setLoading(false);
@@ -114,7 +134,7 @@ const AlbumSection: React.FC = () => {
   };
 
   return (
-    <div className="bg-slate-50 py-24">
+    <div id="album-section-top" ref={sectionTopRef} className="bg-slate-50 py-24 scroll-mt-24">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-16">
           <div className="inline-flex items-center justify-center p-3 mb-4 bg-rose-50 rounded-full text-rose-500 shadow-sm">
@@ -123,18 +143,47 @@ const AlbumSection: React.FC = () => {
           <h2 className="text-4xl font-serif font-bold text-slate-800 mb-4">은혜의 순간들</h2>
           <p className="text-slate-600 text-lg">창원섬김의교회의 소중한 추억과 은혜의 순간들을 담은 사진첩입니다</p>
 
-          {/* 로그인한 사용자만 작성 버튼 표시 */}
-          {user && (
-            <div className="mt-6">
+          {/* [한글 코멘트] 사용자 요청: 앨범 실시간 검색 입력창 & X 지우기 버튼 */}
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 max-w-xl mx-auto">
+            <div className="relative w-full max-w-md">
+              <input
+                type="text"
+                placeholder="앨범 제목 또는 설명 검색..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full pl-10 pr-9 py-2.5 bg-white text-slate-800 placeholder-slate-400 rounded-full text-sm border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent shadow-sm transition-all"
+              />
+              <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setDebouncedSearch('');
+                    setCurrentPage(1);
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                  title="검색어 지우기"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+
+            {/* 로그인한 사용자만 작성 버튼 표시 */}
+            {user && (
               <button
                 onClick={() => setShowWriteModal(true)}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-rose-500 text-white rounded-full font-semibold hover:bg-rose-600 transition-all shadow-md hover:shadow-lg"
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-rose-500 text-white rounded-full font-semibold hover:bg-rose-600 transition-all shadow-md hover:shadow-lg shrink-0"
               >
-                <PlusCircle size={20} />
+                <PlusCircle size={18} />
                 앨범 작성
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -238,25 +287,105 @@ const AlbumSection: React.FC = () => {
               ))}
             </div>
 
-            {/* 페이지네이션 */}
+            {/* [한글 코멘트] 사용자 요청: << (최신 1페이지), < (이전), 숫자 번호, > (다음), >> (처음/마지막페이지) 페이징 UI */}
             {totalPages > 1 && (
-              <div className="mt-12 flex justify-center gap-2">
+              <div className="mt-12 flex justify-center items-center gap-1.5">
+                {/* << 최신 페이지 (1페이지) 이동 */}
+                <button
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  title="가장 최신 페이지 (1페이지)"
+                  className="p-2 bg-white border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronsLeft size={18} />
+                </button>
+
+                {/* < 이전 페이지 이동 */}
                 <button
                   onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                   disabled={currentPage === 1}
-                  className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="이전 페이지"
+                  className="p-2 bg-white border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors mr-1"
                 >
-                  이전
+                  <ChevronLeft size={18} />
                 </button>
-                <span className="px-4 py-2 text-slate-600">
-                  {currentPage} / {totalPages}
-                </span>
+
+                {/* 숫자 번호 버튼 목록 */}
+                {(() => {
+                  const pages = [];
+                  const maxVisible = 5;
+                  let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+                  let end = Math.min(totalPages, start + maxVisible - 1);
+
+                  if (end - start + 1 < maxVisible) {
+                    start = Math.max(1, end - maxVisible + 1);
+                  }
+
+                  for (let i = start; i <= end; i++) {
+                    pages.push(i);
+                  }
+
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      {start > 1 && (
+                        <>
+                          <button
+                            onClick={() => setCurrentPage(1)}
+                            className="w-9 h-9 rounded-lg font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                          >
+                            1
+                          </button>
+                          {start > 2 && <span className="px-1 text-slate-400">...</span>}
+                        </>
+                      )}
+
+                      {pages.map(page => (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`w-9 h-9 rounded-lg font-semibold transition-all ${
+                            currentPage === page
+                              ? 'bg-rose-500 text-white shadow-md scale-105'
+                              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+
+                      {end < totalPages && (
+                        <>
+                          {end < totalPages - 1 && <span className="px-1 text-slate-400">...</span>}
+                          <button
+                            onClick={() => setCurrentPage(totalPages)}
+                            className="w-9 h-9 rounded-lg font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                          >
+                            {totalPages}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* > 다음 페이지 이동 */}
                 <button
                   onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                   disabled={currentPage === totalPages}
-                  className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="다음 페이지"
+                  className="p-2 bg-white border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors ml-1"
                 >
-                  다음
+                  <ChevronRight size={18} />
+                </button>
+
+                {/* >> 가장 처음/오래된 페이지 이동 */}
+                <button
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  title={`가장 처음 페이지 (${totalPages}페이지)`}
+                  className="p-2 bg-white border border-slate-200 text-slate-600 rounded-lg font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronsRight size={18} />
                 </button>
               </div>
             )}
@@ -325,13 +454,15 @@ const AlbumSection: React.FC = () => {
         }}
       />
 
-      {/* 이미지 뷰어 모달 */}
+      {/* [한글 코멘트] 사용자 요청: 이미지 뷰어에 앨범 제목 및 단위('장') 전달 */}
       {showImageViewer && (
         <ImageViewerModal
           isOpen={showImageViewer}
           onClose={() => setShowImageViewer(false)}
           images={imageViewerImages}
           initialIndex={imageViewerIndex}
+          title={selectedAlbum ? selectedAlbum.title : '은혜의 순간들'}
+          unit="장"
         />
       )}
     </div>
@@ -474,13 +605,12 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  // [한글 코멘트] 앨범 수정 사진 파일 처리 공통 함수
+  const processFiles = async (files: FileList | File[]) => {
     if (!files || files.length === 0) return;
 
-    // 파일 개수 제한 체크
-    if (photos.length + files.length > 20) {
-      setError('최대 20장까지 업로드할 수 있습니다.');
+    if (photos.length + files.length > 50) {
+      setError('최대 50장까지 업로드할 수 있습니다.');
       return;
     }
 
@@ -502,11 +632,64 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
       setUploading(false);
     }
 
-    // 파일 입력 초기화
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
+
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await processFiles(files);
+  };
+
+  // [한글 코멘트] 사용자 요청: 앨범 수정 모달 클립보드 이미지 붙여넣기(Ctrl+V) 처리
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePaste = async (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        const items = e.clipboardData?.items;
+        let hasImage = false;
+        if (items) {
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+              hasImage = true;
+              break;
+            }
+          }
+        }
+        if (!hasImage) return;
+      }
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const pastedFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.indexOf('image') !== -1) {
+          const blob = item.getAsFile();
+          if (blob) {
+            const ext = item.type.split('/')[1] || 'png';
+            const file = new File([blob], `pasted-image-${Date.now()}-${i}.${ext}`, { type: item.type });
+            pastedFiles.push(file);
+          }
+        }
+      }
+
+      if (pastedFiles.length > 0) {
+        e.preventDefault();
+        await processFiles(pastedFiles);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [isOpen, photos]);
 
   // 드래그 앤 드롭 핸들러
   const handleDragStart = (index: number) => {
@@ -770,10 +953,11 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
                   </div>
                   <span className={`text-sm transition-colors ${isDragging ? 'text-rose-600 font-semibold' : 'text-slate-600'
                     }`}>
-                    {isDragging ? '여기에 사진을 놓으세요' : '사진을 선택하거나 드래그하여 추가하세요'}
+                    {isDragging ? '여기에 사진을 놓으세요' : '사진을 선택하거나 드래그, 또는 복사한 사진을 붙여넣기(Ctrl+V)하세요'}
                   </span>
-                  <span className="text-xs text-slate-400">최대 20장, 각 10MB (jpg, png, gif, webp)</span>
-                  <span className="text-xs text-slate-400">여러 파일을 동시에 선택하거나 드래그할 수 있습니다</span>
+                  {/* [한글 코멘트] 앨범 수정 안내 텍스트: 최대 50장, 개별 5MB 및 초과시 자동 리사이징/압축 표기 */}
+                  <span className="text-xs text-slate-400">최대 50장, 파일당 5MB 한도 (5MB 초과 원본은 5MB 이하로 자동 압축)</span>
+                  <span className="text-xs text-slate-400">여러 파일을 동시에 선택, 드래그, 또는 Ctrl+V로 붙여넣을 수 있습니다</span>
                 </label>
               </div>
               {uploading && (
@@ -850,11 +1034,11 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
   const processFiles = async (files: FileList | File[]) => {
     if (!files || files.length === 0) return;
 
-    // 최대 20장 제한 체크
+    // [한글 코멘트] 사용자 요청: 앨범 신규 작성 시 최대 50장까지 사진 첨부 허용
     const currentCount = photos.length;
     const newCount = files.length;
-    if (currentCount + newCount > 20) {
-      setError(`최대 20장까지 업로드 가능합니다. (현재 ${currentCount}장, 추가 ${newCount}장)`);
+    if (currentCount + newCount > 50) {
+      setError(`최대 50장까지 업로드 가능합니다. (현재 ${currentCount}장, 추가 ${newCount}장)`);
       return;
     }
 
@@ -895,6 +1079,54 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
     await processFiles(files);
     e.target.value = ''; // 같은 파일 다시 선택 가능하도록 초기화
   };
+
+  // [한글 코멘트] 사용자 요청: 앨범 신규 작성 모달 클립보드 이미지 붙여넣기(Ctrl+V) 처리
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePaste = async (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        const items = e.clipboardData?.items;
+        let hasImage = false;
+        if (items) {
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+              hasImage = true;
+              break;
+            }
+          }
+        }
+        if (!hasImage) return;
+      }
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const pastedFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.indexOf('image') !== -1) {
+          const blob = item.getAsFile();
+          if (blob) {
+            const ext = item.type.split('/')[1] || 'png';
+            const file = new File([blob], `pasted-image-${Date.now()}-${i}.${ext}`, { type: item.type });
+            pastedFiles.push(file);
+          }
+        }
+      }
+
+      if (pastedFiles.length > 0) {
+        e.preventDefault();
+        await processFiles(pastedFiles);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [isOpen, photos]);
 
   // 드래그 앤 드롭 핸들러
   const handleDragEnter = (e: React.DragEvent) => {
@@ -1197,10 +1429,11 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                   </div>
                   <span className={`text-sm transition-colors ${isDragging ? 'text-rose-600 font-semibold' : 'text-slate-600'
                     }`}>
-                    {isDragging ? '여기에 사진을 놓으세요' : '사진을 선택하거나 드래그하여 추가하세요'}
+                    {isDragging ? '여기에 사진을 놓으세요' : '사진을 선택하거나 드래그, 또는 복사한 사진을 붙여넣기(Ctrl+V)하세요'}
                   </span>
-                  <span className="text-xs text-slate-400">최대 20장, 각 10MB (jpg, png, gif, webp)</span>
-                  <span className="text-xs text-slate-400">여러 파일을 동시에 선택하거나 드래그할 수 있습니다</span>
+                  {/* [한글 코멘트] 앨범 작성 안내 텍스트: 최대 50장, 개별 5MB 및 초과시 자동 리사이징/압축 표기 */}
+                  <span className="text-xs text-slate-400">최대 50장, 파일당 5MB 한도 (5MB 초과 원본은 5MB 이하로 자동 압축)</span>
+                  <span className="text-xs text-slate-400">여러 파일을 동시에 선택, 드래그, 또는 Ctrl+V로 붙여넣을 수 있습니다</span>
                 </label>
               </div>
               {uploading && (

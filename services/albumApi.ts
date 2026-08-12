@@ -41,10 +41,11 @@ interface ApiResponse<T> {
   errors?: any[];
 }
 
-// 앨범 목록 조회
+// [한글 코멘트] 사용자 요청: 앨범 목록 실시간 검색 파라미터(search) 지원 추가
 export const getAlbums = async (params?: {
   page?: number;
   limit?: number;
+  search?: string;
 }): Promise<{
   albums: Album[];
   pagination: {
@@ -58,6 +59,9 @@ export const getAlbums = async (params?: {
     const queryParams = new URLSearchParams();
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.search && params.search.trim() !== '') {
+      queryParams.append('search', params.search.trim());
+    }
 
     const url = `${API_BASE_URL}?${queryParams.toString()}`;
     console.log('앨범 API 호출:', { url, API_BASE_URL, params, fullUrl: window.location.origin + url });

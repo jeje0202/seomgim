@@ -1,9 +1,10 @@
 // 설문조사 작성 모달 컴포넌트
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { createSurvey } from '../services/surveyApi';
 import { useModalBackButton } from '../hooks/useModalBackButton';
+import HtmlToolbar from './HtmlToolbar';
 
 interface SurveyWriteModalProps {
   isOpen: boolean;
@@ -34,6 +35,16 @@ const SurveyWriteModal: React.FC<SurveyWriteModalProps> = ({
     end_count: '',
     end_percentage: ''
   });
+
+  // [한글 코멘트] 리치 텍스트 서식 툴바(HtmlToolbar) 연동을 위한 Ref
+  const contentEditableRef = useRef<HTMLDivElement>(null);
+
+  const updateDescriptionFromEditable = () => {
+    if (contentEditableRef.current) {
+      const htmlContent = contentEditableRef.current.innerHTML;
+      setFormData(prev => ({ ...prev, description: htmlContent }));
+    }
+  };
   const [questions, setQuestions] = useState<Question[]>([
     {
       question_text: '',
@@ -220,17 +231,23 @@ const SurveyWriteModal: React.FC<SurveyWriteModalProps> = ({
             />
           </div>
 
+          {/* [한글 코멘트] 사용자 요청: 기본적인 글자 색상, 크기, 굵기, 이탤릭체 지정이 가능한 서식 툴바 연동 */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
-              설명
+              설명 서식 편집
             </label>
-            <textarea
-              name="description"
-              value={formData.description}
-              onChange={handleChange}
-              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-              rows={3}
-            />
+            <div className="border border-slate-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-teal-500 focus-within:border-transparent transition-all">
+              <HtmlToolbar targetRef={contentEditableRef} onContentChange={updateDescriptionFromEditable} />
+              <div
+                ref={contentEditableRef}
+                contentEditable
+                onBlur={updateDescriptionFromEditable}
+                onInput={updateDescriptionFromEditable}
+                className="w-full min-h-[120px] max-h-[250px] overflow-y-auto px-4 py-2.5 bg-white text-slate-800 text-sm focus:outline-none leading-relaxed"
+                style={{ whiteSpace: 'pre-wrap' }}
+                data-placeholder="설문조사 상세 설명과 폰트 서식, 글자 색상, 기울임체, 하이퍼링크를 입력하세요"
+              />
+            </div>
           </div>
 
           {/* 설문 대상 타입 */}

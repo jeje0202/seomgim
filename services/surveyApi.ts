@@ -138,7 +138,7 @@ export const createSurvey = async (surveyData: {
   }
 };
 
-// 설문조사 수정
+// [한글 코멘트] 사용자 요청: 관리자 권한 전용 설문조사 내용 수정 API
 export const updateSurvey = async (
   surveyId: number,
   surveyData: {
@@ -146,8 +146,12 @@ export const updateSurvey = async (
     description?: string;
     is_active?: boolean;
     is_anonymous?: boolean;
-    start_date?: string;
-    end_date?: string;
+    target_type?: 'anyone' | 'authenticated' | 'authenticated_anonymous';
+    start_date?: string | null;
+    end_date?: string | null;
+    end_condition_type?: 'date' | 'count' | 'percentage';
+    end_count?: number | null;
+    end_percentage?: number | null;
   }
 ): Promise<void> => {
   try {
@@ -168,7 +172,8 @@ export const updateSurvey = async (
     const result: ApiResponse<null> = await response.json();
 
     if (!result.success) {
-      throw new Error(result.message || '설문조사 수정 실패');
+      const serverMessage = result.message || (result.errors && result.errors.length > 0 ? result.errors[0].msg : '설문조사 수정 실패');
+      throw new Error(serverMessage);
     }
   } catch (error: any) {
     console.error('설문조사 수정 오류:', error);

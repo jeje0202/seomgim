@@ -30,6 +30,23 @@ const BoardSection: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
+  // [한글 코멘트] 사용자 요청: 실시간 디바운스(300ms) 검색을 위한 상태
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // [한글 코멘트] 사용자 요청: 검색어 1자 이상 시 X 버튼 클릭 즉시 내용 삭제 및 전체 목록 복원
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setCurrentPage(1);
+  };
+
   const [user, setUser] = useState<UserType | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]); // 선택된 태그 배열
   const [availableTags, setAvailableTags] = useState<Tag[]>([]); // 사용 가능한 태그 목록
@@ -176,7 +193,7 @@ const BoardSection: React.FC = () => {
     if (selectedCategory) {
       loadPosts();
     }
-  }, [selectedCategory, currentPage, memberBoardSubTab, selectedTags]); // selectedTags 의존성 추가
+  }, [selectedCategory, currentPage, memberBoardSubTab, selectedTags, debouncedSearch]); // debouncedSearch 의존성 추가
 
   // 백그라운드에서 글 목록 주기적 갱신 (30초마다, 변경사항이 있을 때만 화면 업데이트)
   useEffect(() => {
@@ -313,7 +330,14 @@ const BoardSection: React.FC = () => {
         }
       }
 
-      const result = await getPosts(categoryIdToLoad || selectedCategory || undefined, currentPage, 20, selectedTags.length > 0 ? selectedTags : undefined);
+      // [한글 코멘트] 실시간 디바운스 검색어(debouncedSearch) 전달
+      const result = await getPosts(
+        categoryIdToLoad || selectedCategory || undefined,
+        currentPage,
+        20,
+        selectedTags.length > 0 ? selectedTags : undefined,
+        debouncedSearch
+      );
       setPosts(result.posts);
       postsRef.current = result.posts; // ref도 업데이트
       setTotalPages(result.pagination.totalPages);
@@ -464,6 +488,8 @@ const BoardSection: React.FC = () => {
                     if (!isDisabled) {
                       setSelectedCategory(category.category_id);
                       setCurrentPage(1);
+                      setSearchQuery('');
+                      setDebouncedSearch('');
                       // 성도전용게시판 선택 시 기본 탭 설정 및 태그 선택 초기화
                       if (isMemberBoard) {
                         setMemberBoardSubTab('member');
@@ -592,112 +618,53 @@ const BoardSection: React.FC = () => {
           return (
             <div className="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
 
-              {/* 게시판 헤더 */}
-              <div className="bg-gradient-to-r from-teal-500 to-blue-500 p-4 md:p-6">
-                {/* 모바일: 세로 배치, 데스크톱: 가로 배치 */}
-                <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 md:gap-4">
-                  {/* 첫 번째 줄: 제목, 총 개수, 글쓰기 버튼 (모바일에서 모든 게시판) */}
-                  <div className="flex flex-wrap items-center gap-2 md:gap-3 text-white">
-                    <div className="flex items-center gap-2 md:gap-3">
-                      <MessageSquare size={20} className="md:w-6 md:h-6" />
-                      <h3 className="text-lg md:text-xl font-bold">
-                        {categories.find(c => c.category_id === selectedCategory)?.category_name}
-                      </h3>
-                      <span className="px-2 md:px-3 py-1 bg-white/20 rounded-full text-xs md:text-sm whitespace-nowrap">
-                        총 {posts.length}개
-                      </span>
-                    </div>
+              {/* [한글 코멘트] 사용자 요청: 게시판 상단 헤더 깔끔화 (제목, 개수, 글쓰기 버튼) */}
+              <div className="bg-gradient-to-r from-teal-500 to-blue-500 p-4 md:p-6 text-white">
+                <div className="flex items-center justify-between gap-3 w-full">
+                  {/* 좌측: 카테고리 아이콘, 제목, 총 글 개수 뱃지 */}
+                  <div className="flex items-center gap-2 md:gap-3">
+                    <MessageSquare size={22} className="md:w-6 md:h-6 shrink-0 text-white/90" />
+                    <h3 className="text-lg md:text-xl font-bold tracking-tight">
+                      {categories.find(c => c.category_id === selectedCategory)?.category_name}
+                    </h3>
+                    <span className="px-2.5 py-1 bg-white/20 rounded-full text-xs md:text-sm font-medium whitespace-nowrap backdrop-blur-sm">
+                      총 {posts.length}개
+                    </span>
+                  </div>
 
-                    {/* 모바일에서 글쓰기 버튼 (모든 게시판 제목 줄 마지막에 표시) */}
+                  {/* 우측: 글쓰기 버튼 */}
+                  <div className="shrink-0">
                     {(() => {
                       const currentCategory = categories.find(c => c.category_id === selectedCategory);
                       const isOrgBoard = (currentCategory?.category_code === 'organization') ||
                         (currentCategory?.category_code === 'member' && memberBoardSubTab === 'organization');
                       const isMemberBoard = (currentCategory?.category_code === 'member' && memberBoardSubTab === 'member');
 
-                      // 공지사항 게시판은 관리자 이상만 작성 가능
+                      let canWrite = false;
+                      let tooltipTitle = '';
+
                       if (currentCategory?.category_code === 'notice') {
-                        if (!user || !hasRole(user, 'admin', 'super-admin')) {
-                          return (
-                            <button
-                              disabled
-                              className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white/50 text-slate-400 rounded-xl text-sm font-semibold cursor-not-allowed whitespace-nowrap ml-auto"
-                              title="공지사항 게시판은 관리자 권한 이상이 필요합니다."
-                            >
-                              <PlusCircle size={16} />
-                              <span className="hidden xs:inline">글쓰기</span>
-                            </button>
-                          );
-                        }
-                        // 공지사항 게시판이고 권한이 있으면 글쓰기 버튼 표시
-                        return (
-                          <button
-                            onClick={() => setShowWriteModal(true)}
-                            className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white text-teal-600 rounded-xl text-sm font-semibold hover:bg-teal-50 transition-all shadow-md whitespace-nowrap ml-auto"
-                          >
-                            <PlusCircle size={16} />
-                            <span className="hidden xs:inline">글쓰기</span>
-                          </button>
-                        );
+                        canWrite = !!(user && hasRole(user, 'admin', 'super-admin'));
+                        tooltipTitle = '공지사항 게시판은 관리자 권한 이상이 필요합니다.';
+                      } else if (currentCategory?.category_code === 'bulletin') {
+                        canWrite = !!(user && hasRole(user, 'manager', 'admin', 'super-admin'));
+                        tooltipTitle = '주보게시판은 담당자 권한 이상이 필요합니다.';
+                      } else if (isOrgBoard || isMemberBoard) {
+                        canWrite = true;
+                      } else {
+                        canWrite = !!(currentCategory?.category_code === 'free' || (user && (!currentCategory?.is_private || hasRole(user, 'manager', 'admin', 'super-admin'))));
+                        tooltipTitle = '성도전용 게시판입니다. 로그인이 필요합니다.';
                       }
 
-                      // 주보게시판은 담당자 이상만 작성 가능
-                      if (currentCategory?.category_code === 'bulletin') {
-                        if (!user || !hasRole(user, 'manager', 'admin', 'super-admin')) {
-                          return (
-                            <button
-                              disabled
-                              className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white/50 text-slate-400 rounded-xl text-sm font-semibold cursor-not-allowed whitespace-nowrap ml-auto"
-                              title="주보게시판은 담당자 권한 이상이 필요합니다."
-                            >
-                              <PlusCircle size={16} />
-                              <span className="hidden xs:inline">글쓰기</span>
-                            </button>
-                          );
-                        }
-                        // 주보게시판이고 권한이 있으면 글쓰기 버튼 표시
-                        return (
-                          <button
-                            onClick={() => setShowWriteModal(true)}
-                            className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white text-teal-600 rounded-xl text-sm font-semibold hover:bg-teal-50 transition-all shadow-md whitespace-nowrap ml-auto"
-                          >
-                            <PlusCircle size={16} />
-                            <span className="hidden xs:inline">글쓰기</span>
-                          </button>
-                        );
-                      }
-
-                      // 성도게시판/기관게시판
-                      if (isOrgBoard || isMemberBoard) {
-                        return (
-                          <button
-                            onClick={() => setShowWriteModal(true)}
-                            className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white text-teal-600 rounded-xl text-sm font-semibold hover:bg-teal-50 transition-all shadow-md whitespace-nowrap ml-auto"
-                          >
-                            <PlusCircle size={16} />
-                            <span className="hidden xs:inline">글쓰기</span>
-                          </button>
-                        );
-                      }
-
-                      // 자유게시판, 기도요청 등 기타 게시판
-                      const canWrite = currentCategory && (
-                        currentCategory.category_code === 'free' || // 자유게시판은 로그인 없이 가능
-                        (user && (
-                          !currentCategory.is_private || // 성도전용이 아니거나
-                          hasRole(user, 'manager', 'admin', 'super-admin') // manager 이상 권한
-                        ))
-                      );
-
-                      if (!canWrite && currentCategory?.is_private) {
+                      if (!canWrite) {
                         return (
                           <button
                             disabled
-                            className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white/50 text-slate-400 rounded-xl text-sm font-semibold cursor-not-allowed whitespace-nowrap ml-auto"
-                            title="성도전용 게시판입니다. 로그인이 필요합니다."
+                            className="flex items-center gap-1.5 md:gap-2 px-3.5 md:px-5 py-2 md:py-2.5 bg-white/40 text-white/70 rounded-xl text-xs md:text-sm font-semibold cursor-not-allowed border border-white/20"
+                            title={tooltipTitle}
                           >
-                            <PlusCircle size={16} />
-                            <span className="hidden xs:inline">글쓰기</span>
+                            <PlusCircle size={16} className="md:w-5 md:h-5" />
+                            <span>글쓰기</span>
                           </button>
                         );
                       }
@@ -705,160 +672,10 @@ const BoardSection: React.FC = () => {
                       return (
                         <button
                           onClick={() => setShowWriteModal(true)}
-                          className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white text-teal-600 rounded-xl text-sm font-semibold hover:bg-teal-50 transition-all shadow-md whitespace-nowrap ml-auto"
+                          className="flex items-center gap-1.5 md:gap-2 px-3.5 md:px-5 py-2 md:py-2.5 bg-white text-teal-600 rounded-xl text-xs md:text-sm font-bold hover:bg-teal-50 transition-all shadow-md hover:shadow-lg active:scale-95 cursor-pointer"
                         >
-                          <PlusCircle size={16} />
-                          <span className="hidden xs:inline">글쓰기</span>
-                        </button>
-                      );
-                    })()}
-                  </div>
-
-                  {/* 태그 목록 (기관게시판 및 성도게시판일 때 표시) - 모바일: 타이틀 밑에, 데스크톱: 중간 영역 */}
-                  {(() => {
-                    const currentCategory = categories.find(c => c.category_id === selectedCategory);
-                    const orgCategory = categories.find(c => c.category_code === 'organization');
-                    const isOrgBoard = (currentCategory?.category_code === 'organization') ||
-                      (currentCategory?.category_code === 'member' && memberBoardSubTab === 'organization');
-                    const isMemberBoard = (currentCategory?.category_code === 'member' && memberBoardSubTab === 'member');
-                    const canManageTags = user && hasRole(user, 'admin', 'super-admin');
-
-                    if ((isOrgBoard || isMemberBoard) && (availableTags.length > 0 || canManageTags)) {
-                      return (
-                        <div className="w-full md:flex-1 md:flex md:flex-wrap gap-1.5 md:justify-center md:items-center min-w-0 md:px-4 overflow-x-auto md:overflow-x-visible">
-                          <div className="flex gap-1.5 md:flex-wrap md:justify-center items-center min-w-max md:min-w-0">
-                            {/* 태그관리 버튼 (모바일: 태그 목록 앞, 데스크톱: 태그 목록 앞) */}
-                            {canManageTags && (
-                              <button
-                                onClick={() => setShowTagManagementModal(true)}
-                                className="px-2 md:px-3 py-1 md:py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-full text-xs md:text-sm font-semibold transition-colors shadow-md flex items-center gap-1 md:gap-1.5 whitespace-nowrap flex-shrink-0"
-                                title="태그 관리"
-                              >
-                                <Settings size={12} className="md:w-3.5 md:h-3.5" />
-                                <span className="hidden sm:inline">태그관리</span>
-                              </button>
-                            )}
-                            {availableTags.map((tag) => {
-                              const isSelected = selectedTags.includes(tag.tag_name);
-                              return (
-                                <button
-                                  key={tag.tag_id}
-                                  onClick={() => {
-                                    if (isSelected) {
-                                      // 이미 선택된 태그면 제거
-                                      setSelectedTags(prev => prev.filter(t => t !== tag.tag_name));
-                                    } else {
-                                      // 선택되지 않은 태그면 추가
-                                      setSelectedTags(prev => [...prev, tag.tag_name]);
-                                    }
-                                    setCurrentPage(1);
-                                  }}
-                                  className={`px-2 py-0.5 rounded-full text-xs font-medium transition-all shadow-sm hover:shadow-md whitespace-nowrap flex-shrink-0 ${isSelected
-                                    ? 'ring-2 ring-white ring-offset-1 ring-offset-teal-500 scale-105'
-                                    : 'opacity-90 hover:opacity-100'
-                                    }`}
-                                  style={{
-                                    backgroundColor: isSelected ? tag.tag_color : `${tag.tag_color}cc`,
-                                    color: '#ffffff',
-                                    border: isSelected ? '2px solid white' : '1px solid rgba(255,255,255,0.3)'
-                                  }}
-                                >
-                                  {tag.tag_name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
-
-                  {/* 오른쪽 영역: 글쓰기 버튼 (데스크톱만 표시) */}
-                  <div className="hidden md:block flex-shrink-0">
-                    {(() => {
-                      const currentCategory = categories.find(c => c.category_id === selectedCategory);
-
-                      // 공지사항 게시판은 관리자 이상만 작성 가능
-                      if (currentCategory?.category_code === 'notice') {
-                        if (!user || !hasRole(user, 'admin', 'super-admin')) {
-                          return (
-                            <button
-                              disabled
-                              className="flex items-center gap-2 px-5 py-2.5 bg-white/50 text-slate-400 rounded-xl font-semibold cursor-not-allowed"
-                              title="공지사항 게시판은 관리자 권한 이상이 필요합니다."
-                            >
-                              <PlusCircle size={20} />
-                              글쓰기
-                            </button>
-                          );
-                        }
-                        // 공지사항 게시판이고 권한이 있으면 글쓰기 버튼 표시
-                        return (
-                          <button
-                            onClick={() => setShowWriteModal(true)}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-white text-teal-600 rounded-xl font-semibold hover:bg-teal-50 transition-all shadow-md hover:shadow-lg"
-                          >
-                            <PlusCircle size={20} />
-                            글쓰기
-                          </button>
-                        );
-                      }
-
-                      // 주보게시판은 담당자 이상만 작성 가능
-                      if (currentCategory?.category_code === 'bulletin') {
-                        if (!user || !hasRole(user, 'manager', 'admin', 'super-admin')) {
-                          return (
-                            <button
-                              disabled
-                              className="flex items-center gap-2 px-5 py-2.5 bg-white/50 text-slate-400 rounded-xl font-semibold cursor-not-allowed"
-                              title="주보게시판은 담당자 권한 이상이 필요합니다."
-                            >
-                              <PlusCircle size={20} />
-                              글쓰기
-                            </button>
-                          );
-                        }
-                        // 주보게시판이고 권한이 있으면 글쓰기 버튼 표시
-                        return (
-                          <button
-                            onClick={() => setShowWriteModal(true)}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-white text-teal-600 rounded-xl font-semibold hover:bg-teal-50 transition-all shadow-md hover:shadow-lg"
-                          >
-                            <PlusCircle size={20} />
-                            글쓰기
-                          </button>
-                        );
-                      }
-
-                      const canWrite = currentCategory && (
-                        currentCategory.category_code === 'free' || // 자유게시판은 로그인 없이 가능
-                        (user && (
-                          !currentCategory.is_private || // 성도전용이 아니거나
-                          hasRole(user, 'manager', 'admin', 'super-admin') // manager 이상 권한
-                        ))
-                      );
-
-                      if (!canWrite && currentCategory?.is_private) {
-                        return (
-                          <button
-                            disabled
-                            className="flex items-center gap-2 px-5 py-2.5 bg-white/50 text-slate-400 rounded-xl font-semibold cursor-not-allowed"
-                            title="성도전용 게시판입니다. 로그인이 필요합니다."
-                          >
-                            <PlusCircle size={20} />
-                            글쓰기
-                          </button>
-                        );
-                      }
-
-                      return (
-                        <button
-                          onClick={() => setShowWriteModal(true)}
-                          className="flex items-center gap-2 px-5 py-2.5 bg-white text-teal-600 rounded-xl font-semibold hover:bg-teal-50 transition-all shadow-md hover:shadow-lg"
-                        >
-                          <PlusCircle size={20} />
-                          글쓰기
+                          <PlusCircle size={16} className="md:w-5 md:h-5" />
+                          <span>글쓰기</span>
                         </button>
                       );
                     })()}
@@ -866,27 +683,106 @@ const BoardSection: React.FC = () => {
                 </div>
               </div>
 
-              {/* 검색 바 */}
+              {/* [한글 코멘트] 사용자 요청: 모바일 화면에서 태그 내용들이 한 줄로 가로 스크롤(overflow-x-auto)되도록 수정 */}
+              {(() => {
+                const currentCategory = categories.find(c => c.category_id === selectedCategory);
+                const isOrgBoard = (currentCategory?.category_code === 'organization') ||
+                  (currentCategory?.category_code === 'member' && memberBoardSubTab === 'organization');
+                const isMemberBoard = (currentCategory?.category_code === 'member' && memberBoardSubTab === 'member');
+                const canManageTags = user && hasRole(user, 'admin', 'super-admin');
+
+                if ((isOrgBoard || isMemberBoard) && (availableTags.length > 0 || canManageTags)) {
+                  return (
+                    <div className="bg-teal-50/60 border-b border-teal-100/70 p-3 md:p-4 overflow-x-auto scrollbar-thin scrollbar-thumb-teal-200">
+                      {/* [한글 코멘트] 모바일: flex-nowrap 한 줄 가로 스크롤, 데스크톱(md): flex-wrap 다단 배치 */}
+                      <div className="flex items-center gap-2 flex-nowrap md:flex-wrap min-w-max md:min-w-0">
+                        {/* 태그관리 버튼 */}
+                        {canManageTags && (
+                          <button
+                            onClick={() => setShowTagManagementModal(true)}
+                            className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-full text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 shrink-0 whitespace-nowrap active:scale-95 cursor-pointer"
+                            title="태그 관리"
+                          >
+                            <Settings size={14} />
+                            <span>태그관리</span>
+                          </button>
+                        )}
+                        {/* 태그 목록들 */}
+                        {availableTags.map((tag) => {
+                          const isSelected = selectedTags.includes(tag.tag_name);
+                          return (
+                            <button
+                              key={tag.tag_id}
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedTags(prev => prev.filter(t => t !== tag.tag_name));
+                                } else {
+                                  setSelectedTags(prev => [...prev, tag.tag_name]);
+                                }
+                                setCurrentPage(1);
+                              }}
+                              className={`px-3 py-1 rounded-full text-xs font-semibold transition-all shadow-sm hover:shadow-md cursor-pointer shrink-0 whitespace-nowrap active:scale-95 ${isSelected
+                                ? 'ring-2 ring-teal-600 ring-offset-1 scale-105 font-bold'
+                                : 'opacity-90 hover:opacity-100'
+                                }`}
+                              style={{
+                                backgroundColor: isSelected ? tag.tag_color : `${tag.tag_color}dd`,
+                                color: '#ffffff',
+                                border: isSelected ? '2px solid white' : '1px solid rgba(255,255,255,0.4)'
+                              }}
+                            >
+                              {tag.tag_name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* [한글 코멘트] 사용자 요청: 5개 게시판 전체 본문 상단 검색 바 & 1자 이상 입력 시 X 지우기 버튼 표출 및 클리어 로직 */}
               <div className="p-4 bg-slate-50 border-b border-slate-200">
-                <div className="flex gap-2 max-w-md mb-4">
+                <div className="flex gap-2 max-w-md">
                   <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
                     <input
                       type="text"
-                      placeholder="제목, 내용으로 검색..."
+                      placeholder="제목, 내용, 작성자 검색..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyPress={(e) => {
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      onKeyDown={(e) => {
                         if (e.key === 'Enter') {
-                          loadPosts();
+                          e.preventDefault();
+                          setDebouncedSearch(searchQuery);
+                          setCurrentPage(1);
                         }
                       }}
-                      className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                      className="w-full pl-10 pr-9 py-2 border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all bg-white text-sm"
                     />
+                    {/* [한글 코멘트] 1글자 이상 입력되어 있을 때 우측 X 지우기 버튼 표출 및 클릭 시 즉시 내용 삭제/전체 목록 복원 */}
+                    {searchQuery.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearSearch}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200 transition-colors cursor-pointer z-10"
+                        title="검색어 지우기 및 전체 목록 복원"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
                   </div>
                   <button
-                    onClick={loadPosts}
-                    className="px-5 py-2.5 bg-teal-500 text-white rounded-lg font-semibold hover:bg-teal-600 transition-colors"
+                    type="button"
+                    onClick={() => {
+                      setDebouncedSearch(searchQuery);
+                      setCurrentPage(1);
+                    }}
+                    className="px-5 py-2 bg-teal-500 text-white rounded-lg text-sm font-semibold hover:bg-teal-600 transition-colors cursor-pointer shadow-sm shrink-0"
                   >
                     검색
                   </button>

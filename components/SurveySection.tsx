@@ -1,10 +1,11 @@
 // 설문조사 섹션 컴포넌트
 import React, { useState, useEffect } from 'react';
-import { ClipboardList, PlusCircle, Calendar, Users, Eye, X, Trash2 } from 'lucide-react';
+import { ClipboardList, PlusCircle, Calendar, Users, Eye, X, Trash2, Edit2 } from 'lucide-react';
 import { getSurveys, Survey, cancelSurvey, deleteSurvey } from '../services/surveyApi';
 import { getUserInfo, hasRole, User as UserType } from '../services/authApi';
 import SurveyDetailModal from './SurveyDetailModal';
 import SurveyWriteModal from './SurveyWriteModal';
+import SurveyEditModal from './SurveyEditModal';
 import AlertModal from './AlertModal';
 
 const SurveySection: React.FC = () => {
@@ -13,6 +14,9 @@ const SurveySection: React.FC = () => {
   const [user, setUser] = useState<UserType | null>(null);
   const [showWriteModal, setShowWriteModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  // [한글 코멘트] 사용자 요청: 관리자 전용 설문조사 수정을 위한 상태
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingSurvey, setEditingSurvey] = useState<Survey | null>(null);
   const [selectedSurveyId, setSelectedSurveyId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'ended'>('active');
   const [cancelModal, setCancelModal] = useState<{ isOpen: boolean; surveyId: number | null; surveyTitle: string }>({
@@ -213,9 +217,21 @@ const SurveySection: React.FC = () => {
                 key={survey.survey_id}
                 className="bg-white/90 backdrop-blur-sm rounded-2xl p-6 shadow-sm border-2 border-purple-100/50 hover:shadow-lg hover:border-purple-300 hover:bg-white transition-all duration-300 relative"
               >
-                {/* 취소/삭제 버튼 (관리자만 표시) */}
+                {/* [한글 코멘트] 사용자 요청: 관리자 권한 이상 사용자인 경우 설문 수정/취소/삭제 버튼 표출 */}
                 {user && hasRole(user, 'admin', 'super-admin') && (
-                  <div className="absolute top-3 right-3 flex gap-2 z-10">
+                  <div className="absolute top-3 right-3 flex gap-1.5 z-10">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingSurvey(survey);
+                        setShowEditModal(true);
+                      }}
+                      className="p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-md transition-all active:scale-95 cursor-pointer"
+                      title="설문조사 내용 수정"
+                    >
+                      <Edit2 size={15} />
+                    </button>
+
                     {survey.is_active ? (
                       <button
                         onClick={(e) => {
@@ -226,10 +242,10 @@ const SurveySection: React.FC = () => {
                             surveyTitle: survey.title
                           });
                         }}
-                        className="p-2 bg-amber-500 hover:bg-amber-600 text-white rounded-full shadow-md transition-colors"
+                        className="p-2 bg-amber-500 hover:bg-amber-600 text-white rounded-full shadow-md transition-all active:scale-95 cursor-pointer"
                         title="설문조사 취소"
                       >
-                        <X size={16} />
+                        <X size={15} />
                       </button>
                     ) : (
                       <button
@@ -241,10 +257,10 @@ const SurveySection: React.FC = () => {
                             surveyTitle: survey.title
                           });
                         }}
-                        className="p-2 bg-rose-500 hover:bg-rose-600 text-white rounded-full shadow-md transition-colors"
+                        className="p-2 bg-rose-500 hover:bg-rose-600 text-white rounded-full shadow-md transition-all active:scale-95 cursor-pointer"
                         title="설문조사 삭제"
                       >
-                        <Trash2 size={16} />
+                        <Trash2 size={15} />
                       </button>
                     )}
                   </div>
@@ -368,6 +384,23 @@ const SurveySection: React.FC = () => {
           loadSurveys();
         }}
       />
+
+      {/* [한글 코멘트] 사용자 요청: 관리자 권한 전용 설문조사 수정 모달 연동 */}
+      {user && hasRole(user, 'admin', 'super-admin') && (
+        <SurveyEditModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false);
+            setEditingSurvey(null);
+          }}
+          onSuccess={() => {
+            loadSurveys();
+            setShowEditModal(false);
+            setEditingSurvey(null);
+          }}
+          survey={editingSurvey}
+        />
+      )}
     </div>
   );
 };

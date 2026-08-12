@@ -10,6 +10,7 @@ interface ImageViewerModalProps {
   images: string[]; // 이미지 URL 배열
   initialIndex?: number; // 초기 표시할 이미지 인덱스
   title?: string; // 카카오톡 스타일 헤더 제목 (선택)
+  unit?: string; // 단위 ('장', '면' 등 선택, 기본값: '장')
 }
 
 const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
@@ -17,19 +18,25 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   onClose,
   images,
   initialIndex = 0,
-  title = '주보 및 이미지 크게보기'
+  title = '이미지 크게보기',
+  unit = '장'
 }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [scale, setScale] = useState(1); // 확대/축소 배율
-  const [position, setPosition] = useState({ x: 0, y: 0 }); // 이미지 위치 (드래그용)
+  const [position, setPosition] = useState({ x: 0, y: 0 }); // 이미지 위치 (드래그/터치 이동용)
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const imageRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // 모바일 터치 스와이프를 위한 상태
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
-  const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(null);
+  // [한글 코멘트] 사용자 요청: 썸네일 선택 위치 및 스크롤 자동 동기화를 위한 Ref 배열
+  const thumbnailRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // [한글 코멘트] 사용자 요청: 모바일 핀치 줌 (Pinch-to-Zoom) 및 터치 이동(Pan)을 위한 상태
+  const touchStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const initialPinchDistanceRef = useRef<number | null>(null);
+  const initialScaleRef = useRef<number>(1);
+  const initialPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [lastTap, setLastTap] = useState<number>(0);
   
   // 모바일 환경 감지 (768px 미만)
@@ -56,6 +63,17 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
       setPosition({ x: 0, y: 0 });
     }
   }, [isOpen, initialIndex]);
+
+  // [한글 코멘트] 사용자 요청: 선택된 썸네일 위치로 자동 스크롤 동기화
+  useEffect(() => {
+    if (isOpen && thumbnailRefs.current[currentIndex]) {
+      thumbnailRefs.current[currentIndex]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'center'
+      });
+    }
+  }, [currentIndex, isOpen]);
 
   // 이미지 변경 시 스케일과 위치 초기화
   useEffect(() => {
@@ -84,7 +102,7 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
       const a = document.createElement('a');
       a.href = blobUrl;
       const ext = imgUrl.split('.').pop()?.split('?')[0] || 'jpg';
-      a.download = `주보_이미지_${currentIndex + 1}면.${ext}`;
+      a.download = `이미지_${currentIndex + 1}${unit}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -98,8 +116,11 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.15 : 0.15;
-    const newScale = Math.max(0.5, Math.min(5, scale + delta));
+    const newScale = Math.max(0.8, Math.min(5, scale + delta));
     setScale(newScale);
+    if (newScale <= 1) {
+      setPosition({ x: 0, y: 0 });
+    }
   };
 
   // 마우스 드래그 시작
@@ -130,13 +151,13 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
   // 확대
   const handleZoomIn = () => {
-    setScale(prev => Math.min(5, prev + 0.25));
+    setScale(prev => Math.min(5, prev + 0.3));
   };
 
   // 축소
   const handleZoomOut = () => {
     setScale(prev => {
-      const newScale = Math.max(0.5, prev - 0.25);
+      const newScale = Math.max(0.8, prev - 0.3);
       if (newScale <= 1) {
         setPosition({ x: 0, y: 0 });
       }
@@ -152,10 +173,6 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
   // 이전 이미지
   const handlePrev = () => {
-    if (isMobile && currentIndex === 0) {
-      onClose();
-      return;
-    }
     setCurrentIndex(prev => (prev > 0 ? prev - 1 : images.length - 1));
   };
 
@@ -164,53 +181,88 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     setCurrentIndex(prev => (prev < images.length - 1 ? prev + 1 : 0));
   };
 
-  // 모바일 터치 시작 (더블터치 감지 포함)
+  // [한글 코멘트] 두 손가락 거리를 계산하는 유틸리티 함수
+  const getPinchDistance = (touches: React.TouchList) => {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  };
+
+  // [한글 코멘트] 사용자 요청: 모바일 터치 시작 (더블터치 감지 및 핀치 줌 / 이동 준비)
   const handleTouchStart = (e: React.TouchEvent) => {
     const now = Date.now();
-    if (now - lastTap < 300) {
-      handleDoubleClick();
-      setLastTap(0);
+
+    // 1. 두 손가락 핀치 줌 준비
+    if (e.touches.length === 2) {
+      initialPinchDistanceRef.current = getPinchDistance(e.touches);
+      initialScaleRef.current = scale;
       return;
     }
-    setLastTap(now);
 
-    if (scale <= 1) {
+    // 2. 한 손가락 더블 탭 감지
+    if (e.touches.length === 1) {
+      if (now - lastTap < 300) {
+        handleDoubleClick();
+        setLastTap(0);
+        return;
+      }
+      setLastTap(now);
+
       const touch = e.touches[0];
-      setTouchStart({ x: touch.clientX, y: touch.clientY });
-      setTouchEnd(null);
+      touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      initialPosRef.current = { ...position };
+      if (scale > 1) {
+        setIsDragging(true);
+      }
     }
   };
 
-  // 모바일 터치 이동
+  // [한글 코멘트] 사용자 요청: 모바일 터치 이동 (핀치 줌 및 확대 상태 사진 이리저리 이동)
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (scale <= 1) {
+    // 1. 두 손가락 핀치 줌 처리
+    if (e.touches.length === 2 && initialPinchDistanceRef.current !== null) {
+      const currentDistance = getPinchDistance(e.touches);
+      const ratio = currentDistance / initialPinchDistanceRef.current;
+      const newScale = Math.max(0.8, Math.min(5.0, initialScaleRef.current * ratio));
+      setScale(newScale);
+      if (newScale <= 1) {
+        setPosition({ x: 0, y: 0 });
+      }
+      return;
+    }
+
+    // 2. 한 손가락 확대된 사진 이리저리 이동 (Pan)
+    if (e.touches.length === 1 && scale > 1) {
       const touch = e.touches[0];
-      setTouchEnd({ x: touch.clientX, y: touch.clientY });
+      const deltaX = touch.clientX - touchStartRef.current.x;
+      const deltaY = touch.clientY - touchStartRef.current.y;
+
+      setPosition({
+        x: initialPosRef.current.x + deltaX,
+        y: initialPosRef.current.y + deltaY
+      });
     }
   };
 
-  // 모바일 터치 종료 - 스와이프 감지
-  const handleTouchEnd = () => {
-    if (!touchStart || !touchEnd || scale > 1) return;
+  // [한글 코멘트] 사용자 요청: 모바일 터치 종료 (스와이프 또는 터치 이동 마감)
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    setIsDragging(false);
+    initialPinchDistanceRef.current = null;
 
-    const distanceX = touchStart.x - touchEnd.x;
-    const distanceY = touchStart.y - touchEnd.y;
-    const minSwipeDistance = 50;
+    // 축소 상태(scale === 1)에서 좌/우 훔쳐보기(스와이프) 이전/다음 사진 전환
+    if (scale <= 1 && e.changedTouches.length === 1) {
+      const touch = e.changedTouches[0];
+      const deltaX = touch.clientX - touchStartRef.current.x;
+      const deltaY = touch.clientY - touchStartRef.current.y;
 
-    if (Math.abs(distanceX) > Math.abs(distanceY) && Math.abs(distanceX) > minSwipeDistance) {
-      if (distanceX > 0) {
-        handleNext();
-      } else {
-        if (isMobile && currentIndex === 0) {
-          onClose();
-        } else {
+      if (Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY)) {
+        if (deltaX > 0) {
           handlePrev();
+        } else {
+          handleNext();
         }
       }
     }
-
-    setTouchStart(null);
-    setTouchEnd(null);
   };
 
   // 키보드 이벤트
@@ -276,7 +328,7 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               <span>{title}</span>
             </h3>
             <p className="text-xs text-slate-400">
-              {currentIndex + 1} / {images.length} 면 (더블클릭/더블터치 시 2.5배 확대)
+              {currentIndex + 1} / {images.length} {unit} (더블클릭/더블터치 시 2.5배 확대)
             </p>
           </div>
         </div>
@@ -304,10 +356,11 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
         </div>
       </div>
 
-      {/* 중앙 이미지 화면 영역 */}
+      {/* [한글 코멘트] 사용자 요청: 중앙 이미지 화면 영역 (touch-action: none으로 모바일 핀치 줌 & 터치 이동 간섭 방지) */}
       <div
         ref={containerRef}
-        className="relative flex-1 w-full flex items-center justify-center p-2 sm:p-4 overflow-hidden"
+        className="relative flex-1 w-full flex items-center justify-center p-2 sm:p-4 overflow-hidden touch-none"
+        style={{ touchAction: 'none' }}
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -324,27 +377,28 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             type="button"
             onClick={handlePrev}
             className="absolute left-3 sm:left-6 z-[10002] w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/60 hover:bg-teal-600 text-white flex items-center justify-center transition-all shadow-xl backdrop-blur-md cursor-pointer border border-white/20"
-            aria-label="이전 면"
+            aria-label={`이전 ${unit}`}
           >
             <ChevronLeft size={28} />
           </button>
         )}
 
-        {/* 이미지 (더블클릭/더블터치 시 확대) */}
+        {/* 이미지 (더블클릭/더블터치 및 핀치 줌/터치 이리저리 이동) */}
         <div
           onDoubleClick={handleDoubleClick}
-          className="relative max-w-full max-h-full flex items-center justify-center"
+          className="relative max-w-full max-h-full flex items-center justify-center touch-none"
           style={{
             transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
             transition: isDragging ? 'none' : 'transform 0.15s cubic-bezier(0.2, 0, 0.2, 1)',
-            cursor: scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'zoom-in'
+            cursor: scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'zoom-in',
+            touchAction: 'none'
           }}
         >
           <img
             ref={imageRef}
             src={currentImage}
-            alt={`주보 ${currentIndex + 1}면`}
-            className="max-w-full max-h-[80vh] sm:max-h-[83vh] object-contain rounded-md shadow-2xl"
+            alt={`이미지 ${currentIndex + 1}${unit}`}
+            className="max-w-full max-h-[80vh] sm:max-h-[83vh] object-contain rounded-md shadow-2xl pointer-events-auto"
             draggable={false}
           />
         </div>
@@ -355,27 +409,61 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             type="button"
             onClick={handleNext}
             className="absolute right-3 sm:right-6 z-[10002] w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/60 hover:bg-teal-600 text-white flex items-center justify-center transition-all shadow-xl backdrop-blur-md cursor-pointer border border-white/20"
-            aria-label="다음 면"
+            aria-label={`다음 ${unit}`}
           >
             <ChevronRight size={28} />
           </button>
         )}
+
+        {/* [한글 코멘트] 사용자 요청: 모바일/데스크톱 줌 인/아웃 및 현재 확대 비율 표시 플로팅 툴바 */}
+        <div className="absolute top-4 right-4 z-[10002] flex items-center gap-1.5 bg-slate-900/80 backdrop-blur-md p-1.5 rounded-full border border-slate-700/60 shadow-lg">
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center transition-colors cursor-pointer"
+            title="축소"
+          >
+            <ZoomOut size={16} />
+          </button>
+          <span className="text-xs font-bold text-teal-300 px-2 min-w-[48px] text-center">
+            {Math.round(scale * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center transition-colors cursor-pointer"
+            title="확대"
+          >
+            <ZoomIn size={16} />
+          </button>
+          {scale !== 1 && (
+            <button
+              type="button"
+              onClick={handleReset}
+              className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-amber-400 flex items-center justify-center transition-colors cursor-pointer"
+              title="100% 원본 크기 리셋"
+            >
+              <RotateCw size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* [한글 코멘트] 하단 카카오톡 스타일 주보 페이지 썸네일 바 (중앙 정렬) & 우측 조율 컨트롤 */}
+      {/* [한글 코멘트] 하단 썸네일 바 (첫 장부터 잘림 없이 전체 스크롤 및 선택 위치 자동 동기화) & 우측 컨트롤 */}
       <div className="w-full bg-slate-900/90 backdrop-blur-md px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 z-[10003] border-t border-slate-800 shrink-0">
-        {/* 좌측 영역 (대칭 밸런스용) */}
-        <div className="hidden lg:flex items-center text-xs text-slate-400 font-medium w-48">
-          {images.length > 1 ? `총 ${images.length}면의 주보가 있습니다.` : ''}
+        {/* 좌측 안내 텍스트 (세로 구김 방지 whitespace-nowrap 적용) */}
+        <div className="hidden lg:flex items-center text-xs text-slate-400 font-medium whitespace-nowrap w-48 shrink-0">
+          {images.length > 1 ? `총 ${images.length}${unit}의 사진이 있습니다.` : ''}
         </div>
 
-        {/* [한글 코멘트] 중앙 정렬된 주보 면 썸네일 바 */}
-        <div className="flex-1 flex justify-center max-w-full">
+        {/* [한글 코멘트] 썸네일 탐색 목록 (아이템이 많아도 1번부터 N번까지 잘림 없이 스크롤 가능) */}
+        <div className="flex-1 flex justify-start sm:justify-center max-w-full overflow-hidden">
           {images.length > 1 ? (
-            <div className="flex items-center justify-center gap-2 overflow-x-auto max-w-full py-1 scrollbar-thin">
+            <div className="flex items-center gap-2 overflow-x-auto max-w-full py-1 px-2 scrollbar-thin scroll-smooth">
               {images.map((img, idx) => (
                 <button
                   key={idx}
+                  ref={el => (thumbnailRefs.current[idx] = el)}
                   type="button"
                   onClick={() => setCurrentIndex(idx)}
                   className={`relative w-12 h-14 sm:w-14 sm:h-16 rounded-lg overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
@@ -386,7 +474,7 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
                 >
                   <img src={img} alt={`미니 ${idx + 1}`} className="w-full h-full object-cover" />
                   <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[10px] text-white font-bold text-center py-0.5">
-                    {idx + 1}면
+                    {idx + 1}{unit}
                   </span>
                 </button>
               ))}

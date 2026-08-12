@@ -6,6 +6,7 @@ import { getSurveyDetail, submitSurveyResponse, SurveyDetail, SurveyQuestion } f
 import { getUserInfo } from '../services/authApi';
 import AlertModal from './AlertModal';
 import { useModalBackButton } from '../hooks/useModalBackButton';
+import { linkifyHTML } from '../utils/textUtils';
 
 interface SurveyDetailModalProps {
   isOpen: boolean;
@@ -201,9 +202,13 @@ const SurveyDetailModal: React.FC<SurveyDetailModalProps> = ({
           </div>
         ) : survey ? (
           <>
-            <h2 className="text-2xl font-bold text-slate-800 mb-2 pr-16">{survey.title}</h2>
+            <h2 className="text-2xl font-bold text-slate-800 mb-3 pr-16 leading-snug">{survey.title}</h2>
+            {/* [한글 코멘트] 사용자 요청: 설문조사 본문 글자 색상, 굵기, 기울임체 등 서식 스타일 보존 및 하이퍼링크 자동 변환 */}
             {survey.description && (
-              <p className="text-slate-600 mb-6">{survey.description}</p>
+              <div 
+                className="text-slate-700 mb-6 whitespace-pre-wrap leading-relaxed text-sm md:text-base bg-slate-50/70 p-4 rounded-xl border border-slate-100"
+                dangerouslySetInnerHTML={{ __html: linkifyHTML(survey.description) }}
+              />
             )}
 
             {survey.hasResponded ? (
