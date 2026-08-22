@@ -7,6 +7,7 @@ import { getUserInfo, hasRole, User as UserType } from '../services/authApi';
 import AlertModal from './AlertModal';
 import ImageViewerModal from './ImageViewerModal';
 import { createPortal } from 'react-dom';
+import { useModalBackButton } from '../hooks/useModalBackButton';
 
 const AlbumSection: React.FC = () => {
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -469,12 +470,12 @@ const AlbumSection: React.FC = () => {
   );
 };
 
-// 앨범 상세 모달 컴포넌트
+// [한글 코멘트] 앨범 상세 모달 컴포넌트 (PC/모바일 전체화면 풀스크린 뷰어 적용)
 interface AlbumDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   album: AlbumDetail;
-  onImageClick: (index: number, photos: Array<{ photo_url: string; thumbnail_url?: string }>) => void; // 타입 수정
+  onImageClick: (index: number, photos: Array<{ photo_url: string; thumbnail_url?: string }>) => void;
 }
 
 const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
@@ -483,6 +484,30 @@ const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   album,
   onImageClick
 }) => {
+  // [한글 코멘트] 모바일 뒤로 가기 버튼으로 모달 닫기 지원
+  useModalBackButton({ isOpen, onClose });
+
+  // [한글 코멘트] 모달 열릴 때 body 스크롤 방지 및 ESC 키로 닫기
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const originalOverflow = document.body.style.overflow || '';
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const formatDate = (dateString: string) => {
@@ -497,55 +522,65 @@ const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-0 md:p-4"
+      className="fixed inset-0 bg-white z-[9999] flex flex-col w-full h-full overflow-hidden"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh'
+      }}
     >
-      <div
-        className="bg-white md:rounded-3xl shadow-2xl relative w-full h-full md:w-[80vw] md:h-[80vh] flex flex-col overflow-hidden"
+      {/* 닫기 버튼 - 우측 상단 고정 */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 md:top-6 md:right-8 w-10 h-10 md:w-12 md:h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-all z-20 shadow-lg text-white cursor-pointer hover:scale-105 active:scale-95"
+        aria-label="닫기"
+        title="닫기 (ESC)"
       >
-        {/* 닫기 버튼 - 고정 위치 (모달 외부) */}
-        <button
-          onClick={onClose}
-          className="fixed top-4 right-4 md:top-[10vh] md:right-[10vw] w-10 h-10 md:w-12 md:h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-colors z-[10002] shadow-lg"
-          aria-label="닫기"
-        >
-          <X size={20} className="text-white md:hidden" />
-          <X size={24} className="text-white hidden md:block" />
-        </button>
+        <X size={22} className="text-white" />
+      </button>
 
-        {/* 헤더 영역 - 고정 */}
-        <div className="flex-shrink-0 px-4 md:px-8 pt-6 md:pt-8 pb-4 border-b border-slate-200 relative">
-          <h2 className="text-2xl md:text-3xl font-bold text-slate-800 mb-4 pr-12">{album.title}</h2>
-          {album.description && (
-            <p className="text-sm md:text-base text-slate-600 mb-4 pr-12">{album.description}</p>
-          )}
+      {/* 헤더 영역 - 고정 (전체 화면 너비 활용) */}
+      <div className="flex-shrink-0 px-4 sm:px-8 md:px-12 pt-6 md:pt-8 pb-4 border-b border-slate-200 relative bg-white pr-16 md:pr-24 shadow-sm">
+        <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-800 mb-2 sm:mb-3 truncate">{album.title}</h2>
+        {album.description && (
+          <p className="text-xs sm:text-sm md:text-base text-slate-600 mb-3 whitespace-pre-wrap">{album.description}</p>
+        )}
 
-          <div className="flex items-center gap-4 text-sm text-slate-500 mb-2 pr-12">
-            <div className="flex items-center gap-2">
-              <User size={16} />
-              <span>{album.author_name}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Calendar size={16} />
-              <span>{formatDate(album.created_at)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Eye size={16} />
-              <span>조회 {album.view_count}</span>
-            </div>
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs sm:text-sm text-slate-500">
+          <div className="flex items-center gap-1.5">
+            <User size={15} className="text-slate-400" />
+            <span>{album.author_name}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Calendar size={15} className="text-slate-400" />
+            <span>{formatDate(album.created_at)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Eye size={15} className="text-slate-400" />
+            <span>조회 {album.view_count}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-rose-500 font-medium bg-rose-50 px-2.5 py-0.5 rounded-full text-xs">
+            <Camera size={13} />
+            <span>총 {album.photos.length}장의 사진</span>
           </div>
         </div>
+      </div>
 
-        {/* 스크롤 가능한 본문 영역 */}
-        <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6">
+      {/* 스크롤 가능한 본문 영역 (사진 그리드 - 화면 가득 채움) */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-8 md:px-12 py-6 bg-slate-50">
+        <div className="max-w-7xl mx-auto">
           {/* 사진 그리드 */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-5">
             {album.photos.map((photo, index) => (
               <div
                 key={photo.photo_id}
-                className="relative aspect-square bg-slate-200 rounded-lg overflow-hidden cursor-pointer group"
+                className="relative aspect-square bg-slate-200 rounded-xl overflow-hidden cursor-pointer group shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5"
                 onClick={() => onImageClick(index, album.photos)}
               >
-                {/* 2. AlbumDetailModal 수정: thumbnail_url 우선 사용 */}
                 <img
                   src={photo.thumbnail_url || photo.photo_url}
                   alt={photo.description || `사진 ${index + 1}`}
@@ -555,8 +590,11 @@ const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
                     (e.target as HTMLImageElement).src = '/church_rainbow.jpg';
                   }}
                 />
+                <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[11px] px-2 py-0.5 rounded font-medium shadow">
+                  {index + 1}
+                </div>
                 {photo.description && (
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent text-white text-xs p-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     {photo.description}
                   </div>
                 )}
@@ -570,7 +608,7 @@ const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   );
 };
 
-// 앨범 편집 모달 컴포넌트
+// [한글 코멘트] 앨범 편집 모달 컴포넌트 (PC/모바일 전체화면 풀스크린 적용)
 interface AlbumEditModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -584,6 +622,9 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
   onSuccess,
   album
 }) => {
+  // [한글 코멘트] 모바일 뒤로 가기 버튼으로 모달 닫기 지원
+  useModalBackButton({ isOpen, onClose });
+
   const [formData, setFormData] = useState({ title: album.title, description: album.description || '' });
   const [photos, setPhotos] = useState<Array<{ url: string; thumbnailUrl?: string; preview: string; description: string }>>(
     album.photos.map(p => ({
@@ -599,6 +640,27 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // [한글 코멘트] 모달 열릴 때 body 스크롤 방지 및 ESC 키로 닫기
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const originalOverflow = document.body.style.overflow || '';
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -726,32 +788,12 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragging(false);
 
-    const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'));
-    if (files.length === 0) return;
-
-    if (photos.length + files.length > 20) {
-      setError('최대 20장까지 업로드할 수 있습니다.');
-      return;
-    }
-
-    setUploading(true);
-    setError('');
-
-    try {
-      const uploadedPhotos = await uploadPhotos(files);
-      const newPhotos = uploadedPhotos.map(photo => ({
-        url: photo.url, // 1080p 이미지 URL
-        thumbnailUrl: photo.thumbnailUrl, // 썸네일 URL
-        preview: photo.thumbnailUrl || photo.url, // 미리보기는 썸네일 사용
-        description: ''
-      }));
-      setPhotos(prev => [...prev, ...newPhotos]);
-    } catch (err: any) {
-      setError(err.message || '사진 업로드에 실패했습니다.');
-    } finally {
-      setUploading(false);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      await processFiles(files);
     }
   };
 
@@ -802,46 +844,44 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
 
   if (!isOpen) return null;
 
-  // 사진 개수에 따른 그리드 열 수 계산
-  const getGridCols = (count: number) => {
-    if (count === 1) return 'grid-cols-1';
-    if (count === 2) return 'grid-cols-2';
-    if (count <= 4) return 'grid-cols-2';
-    if (count <= 9) return 'grid-cols-3';
-    if (count <= 16) return 'grid-cols-4';
-    return 'grid-cols-5';
-  };
-
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4"
+      className="fixed inset-0 bg-white z-[9999] flex flex-col w-full h-full overflow-hidden"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh'
+      }}
     >
-      <div
-        className="bg-white rounded-3xl shadow-2xl relative w-[80vw] h-[80vh] flex flex-col overflow-hidden"
+      {/* 닫기 버튼 - 우측 상단 고정 */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 md:top-6 md:right-8 w-10 h-10 md:w-12 md:h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-all z-20 shadow-lg text-white cursor-pointer hover:scale-105 active:scale-95"
+        aria-label="닫기"
+        title="닫기 (ESC)"
       >
-        {/* 닫기 버튼 - 고정 위치 (모달 외부) */}
-        <button
-          onClick={onClose}
-          className="fixed top-[10vh] right-[10vw] w-12 h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-colors z-[10002] shadow-lg"
-          aria-label="닫기"
-        >
-          <X size={24} className="text-white" />
-        </button>
+        <X size={22} className="text-white" />
+      </button>
 
-        {/* 헤더 영역 - 고정 */}
-        <div className="flex-shrink-0 px-8 pt-8 pb-4 border-b border-slate-200 relative">
-          <h2 className="text-2xl font-bold text-slate-800">앨범 편집</h2>
-        </div>
+      {/* 헤더 영역 - 고정 */}
+      <div className="flex-shrink-0 px-4 sm:px-8 md:px-12 pt-6 md:pt-8 pb-4 border-b border-slate-200 relative bg-white pr-16 md:pr-24 shadow-sm">
+        <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-800">앨범 편집</h2>
+      </div>
 
-        {/* 스크롤 가능한 본문 영역 */}
-        <div className="flex-1 overflow-y-auto px-8 py-6">
+      {/* 스크롤 가능한 본문 영역 */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-8 md:px-12 py-6 bg-slate-50">
+        <div className="max-w-5xl mx-auto bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200/80">
           {error && (
             <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-600 text-sm">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-6">
             {/* 제목 */}
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -854,7 +894,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
                 onChange={handleChange}
                 placeholder="앨범 제목을 입력하세요"
                 maxLength={200}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 text-sm md:text-base"
                 required
               />
             </div>
@@ -870,7 +910,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
                 onChange={handleChange}
                 placeholder="앨범 설명을 입력하세요 (선택사항)"
                 rows={3}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 resize-none"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 resize-none text-sm md:text-base"
               />
             </div>
 
@@ -883,9 +923,9 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
                 )}
               </label>
 
-              {/* 사진 미리보기 - 드래그 가능 (모달 가로의 30% 크기) */}
+              {/* 사진 미리보기 - 드래그 가능 그리드 */}
               {photos.length > 0 && (
-                <div className="flex flex-wrap gap-3 mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-4">
                   {photos.map((photo, index) => (
                     <div
                       key={index}
@@ -893,8 +933,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
                       onDragStart={() => handleDragStart(index)}
                       onDragOver={(e) => handleDragOver(e, index)}
                       onDragEnd={handleDragEnd}
-                      className="relative group cursor-move"
-                      style={{ width: 'calc(30% - 8px)', minWidth: '120px' }}
+                      className="relative group cursor-move bg-slate-100 rounded-xl p-1.5 border border-slate-200"
                     >
                       <img
                         src={photo.preview}
@@ -904,7 +943,8 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleRemovePhoto(index)}
-                        className="absolute top-1 right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-2.5 right-2.5 p-1 bg-rose-500 hover:bg-rose-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md cursor-pointer"
+                        title="삭제"
                       >
                         <X size={14} />
                       </button>
@@ -913,9 +953,9 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
                         placeholder="사진 설명"
                         value={photo.description}
                         onChange={(e) => handlePhotoDescriptionChange(index, e.target.value)}
-                        className="mt-1 w-full px-2 py-1 text-xs border border-slate-300 rounded"
+                        className="mt-1.5 w-full px-2 py-1 text-xs border border-slate-300 rounded-md focus:outline-none focus:border-rose-500"
                       />
-                      <div className="absolute top-1 left-1 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                      <div className="absolute top-2.5 left-2.5 bg-black/60 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
                         {index + 1}
                       </div>
                     </div>
@@ -925,9 +965,9 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
 
               {/* 사진 추가 버튼 (드래그 앤 드롭 지원) */}
               <div
-                className={`border-2 border-dashed rounded-lg p-6 text-center transition-all ${isDragging
-                  ? 'border-rose-500 bg-rose-50 scale-105'
-                  : 'border-slate-300 hover:border-rose-500'
+                className={`border-2 border-dashed rounded-xl p-6 sm:p-8 text-center transition-all ${isDragging
+                  ? 'border-rose-500 bg-rose-50 scale-[1.01]'
+                  : 'border-slate-300 hover:border-rose-500 bg-slate-50/50'
                   }`}
                 onDragEnter={handleDragEnter}
                 onDragOver={(e) => e.preventDefault()}
@@ -945,39 +985,42 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
                 />
                 <label
                   htmlFor="edit-photo-upload"
-                  className="cursor-pointer flex flex-col items-center gap-2"
+                  className="cursor-pointer flex flex-col items-center gap-2.5"
                 >
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${isDragging ? 'bg-rose-200' : 'bg-rose-100'
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors ${isDragging ? 'bg-rose-200' : 'bg-rose-100'
                     }`}>
-                    <Camera size={24} className="text-rose-600" />
+                    <Camera size={26} className="text-rose-600" />
                   </div>
-                  <span className={`text-sm transition-colors ${isDragging ? 'text-rose-600 font-semibold' : 'text-slate-600'
+                  <span className={`text-sm sm:text-base transition-colors ${isDragging ? 'text-rose-600 font-semibold' : 'text-slate-700 font-medium'
                     }`}>
                     {isDragging ? '여기에 사진을 놓으세요' : '사진을 선택하거나 드래그, 또는 복사한 사진을 붙여넣기(Ctrl+V)하세요'}
                   </span>
                   {/* [한글 코멘트] 앨범 수정 안내 텍스트: 최대 50장, 개별 5MB 및 초과시 자동 리사이징/압축 표기 */}
-                  <span className="text-xs text-slate-400">최대 50장, 파일당 5MB 한도 (5MB 초과 원본은 5MB 이하로 자동 압축)</span>
+                  <span className="text-xs text-slate-500">최대 50장, 파일당 5MB 한도 (5MB 초과 원본은 5MB 이하로 자동 압축)</span>
                   <span className="text-xs text-slate-400">여러 파일을 동시에 선택, 드래그, 또는 Ctrl+V로 붙여넣을 수 있습니다</span>
                 </label>
               </div>
               {uploading && (
-                <div className="mt-2 text-sm text-rose-600">사진 업로드 중...</div>
+                <div className="mt-3 flex items-center justify-center gap-2 text-sm text-rose-600 font-medium">
+                  <div className="w-4 h-4 border-2 border-rose-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span>사진 업로드 중...</span>
+                </div>
               )}
             </div>
 
             {/* 버튼 */}
-            <div className="flex gap-3 pt-4">
+            <div className="flex gap-3 pt-4 border-t border-slate-100">
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-colors"
+                className="flex-1 px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
               >
                 취소
               </button>
               <button
                 type="submit"
                 disabled={loading || uploading}
-                className="flex-1 px-6 py-3 bg-rose-500 text-white rounded-xl font-semibold hover:bg-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-6 py-3 bg-rose-500 text-white rounded-xl font-semibold hover:bg-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md"
               >
                 {loading ? '수정 중...' : '수정하기'}
               </button>
@@ -990,7 +1033,7 @@ const AlbumEditModal: React.FC<AlbumEditModalProps> = ({
   );
 };
 
-// 앨범 작성 모달 컴포넌트
+// [한글 코멘트] 앨범 작성 모달 컴포넌트 (PC/모바일 전체화면 풀스크린 적용)
 interface AlbumWriteModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -1002,6 +1045,9 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
   onClose,
   onSuccess
 }) => {
+  // [한글 코멘트] 모바일 뒤로 가기 버튼으로 모달 닫기 지원
+  useModalBackButton({ isOpen, onClose });
+
   const [formData, setFormData] = useState({
     title: '',
     description: ''
@@ -1014,6 +1060,27 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [rotatingIndex, setRotatingIndex] = useState<number | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // [한글 코멘트] 모달 열릴 때 body 스크롤 방지 및 ESC 키로 닫기
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const originalOverflow = document.body.style.overflow || '';
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   useEffect(() => {
     if (isOpen) {
@@ -1264,46 +1331,44 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
 
   if (!isOpen) return null;
 
-  // 사진 개수에 따른 그리드 열 수 계산
-  const getGridCols = (count: number) => {
-    if (count === 1) return 'grid-cols-1';
-    if (count === 2) return 'grid-cols-2';
-    if (count <= 4) return 'grid-cols-2';
-    if (count <= 9) return 'grid-cols-3';
-    if (count <= 16) return 'grid-cols-4';
-    return 'grid-cols-5';
-  };
-
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4"
+      className="fixed inset-0 bg-white z-[9999] flex flex-col w-full h-full overflow-hidden"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh'
+      }}
     >
-      <div
-        className="bg-white rounded-3xl shadow-2xl relative w-[80vw] h-[80vh] flex flex-col overflow-hidden"
+      {/* 닫기 버튼 - 우측 상단 고정 */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 md:top-6 md:right-8 w-10 h-10 md:w-12 md:h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-all z-20 shadow-lg text-white cursor-pointer hover:scale-105 active:scale-95"
+        aria-label="닫기"
+        title="닫기 (ESC)"
       >
-        {/* 닫기 버튼 - 고정 위치 (모달 외부) */}
-        <button
-          onClick={onClose}
-          className="fixed top-[10vh] right-[10vw] w-12 h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-colors z-[10002] shadow-lg"
-          aria-label="닫기"
-        >
-          <X size={24} className="text-white" />
-        </button>
+        <X size={22} className="text-white" />
+      </button>
 
-        {/* 헤더 영역 - 고정 */}
-        <div className="flex-shrink-0 px-8 pt-8 pb-4 border-b border-slate-200 relative">
-          <h2 className="text-2xl font-bold text-slate-800">앨범 작성</h2>
-        </div>
+      {/* 헤더 영역 - 고정 */}
+      <div className="flex-shrink-0 px-4 sm:px-8 md:px-12 pt-6 md:pt-8 pb-4 border-b border-slate-200 relative bg-white pr-16 md:pr-24 shadow-sm">
+        <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-800">앨범 작성</h2>
+      </div>
 
-        {/* 스크롤 가능한 본문 영역 */}
-        <div className="flex-1 overflow-y-auto px-8 py-6">
+      {/* 스크롤 가능한 본문 영역 */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-8 md:px-12 py-6 bg-slate-50">
+        <div className="max-w-5xl mx-auto bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200/80">
           {error && (
             <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-600 text-sm">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-6">
             {/* 제목 */}
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -1316,7 +1381,7 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                 onChange={handleChange}
                 placeholder="앨범 제목을 입력하세요"
                 maxLength={200}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 text-sm md:text-base"
                 required
               />
             </div>
@@ -1332,7 +1397,7 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                 onChange={handleChange}
                 placeholder="앨범 설명을 입력하세요 (선택사항)"
                 rows={3}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 resize-none"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500 resize-none text-sm md:text-base"
               />
             </div>
 
@@ -1345,9 +1410,9 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                 )}
               </label>
 
-              {/* 사진 미리보기 - 드래그 가능 (모달 가로의 30% 크기) */}
+              {/* 사진 미리보기 - 드래그 가능 그리드 */}
               {photos.length > 0 && (
-                <div className="flex flex-wrap gap-3 mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-4">
                   {photos.map((photo, index) => (
                     <div
                       key={index}
@@ -1355,8 +1420,7 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                       onDragStart={() => handleDragStart(index)}
                       onDragOver={(e) => handleDragOver(e, index)}
                       onDragEnd={handleDragEnd}
-                      className="relative group cursor-move"
-                      style={{ width: 'calc(30% - 8px)', minWidth: '120px' }}
+                      className="relative group cursor-move bg-slate-100 rounded-xl p-1.5 border border-slate-200"
                     >
                       <img
                         src={photo.preview}
@@ -1366,7 +1430,8 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleRemovePhoto(index)}
-                        className="absolute top-1 right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-2.5 right-2.5 p-1 bg-rose-500 hover:bg-rose-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md cursor-pointer"
+                        title="삭제"
                       >
                         <X size={14} />
                       </button>
@@ -1375,13 +1440,13 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                         type="button"
                         onClick={() => handleRotatePhoto(index)}
                         disabled={rotatingIndex === index}
-                        className="absolute top-1 left-1 p-1.5 bg-blue-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="absolute top-2.5 left-2.5 p-1 bg-blue-500 hover:bg-blue-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed shadow-md cursor-pointer"
                         title="90도 회전"
                       >
                         {rotatingIndex === index ? (
                           <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         ) : (
-                          <RotateCw size={14} />
+                          <RotateCw size={13} />
                         )}
                       </button>
                       <input
@@ -1389,9 +1454,9 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                         placeholder="사진 설명"
                         value={photo.description}
                         onChange={(e) => handlePhotoDescriptionChange(index, e.target.value)}
-                        className="mt-1 w-full px-2 py-1 text-xs border border-slate-300 rounded"
+                        className="mt-1.5 w-full px-2 py-1 text-xs border border-slate-300 rounded-md focus:outline-none focus:border-rose-500"
                       />
-                      <div className="absolute bottom-1 left-1 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                      <div className="absolute bottom-10 left-2.5 bg-black/60 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
                         {index + 1}
                       </div>
                     </div>
@@ -1401,9 +1466,9 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
 
               {/* 사진 추가 버튼 (드래그 앤 드롭 지원) */}
               <div
-                className={`border-2 border-dashed rounded-lg p-6 text-center transition-all ${isDragging
-                  ? 'border-rose-500 bg-rose-50 scale-105'
-                  : 'border-slate-300 hover:border-rose-500'
+                className={`border-2 border-dashed rounded-xl p-6 sm:p-8 text-center transition-all ${isDragging
+                  ? 'border-rose-500 bg-rose-50 scale-[1.01]'
+                  : 'border-slate-300 hover:border-rose-500 bg-slate-50/50'
                   }`}
                 onDragEnter={handleDragEnter}
                 onDragOver={handleFileDragOver}
@@ -1421,39 +1486,42 @@ const AlbumWriteModal: React.FC<AlbumWriteModalProps> = ({
                 />
                 <label
                   htmlFor="photo-upload"
-                  className="cursor-pointer flex flex-col items-center gap-2"
+                  className="cursor-pointer flex flex-col items-center gap-2.5"
                 >
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${isDragging ? 'bg-rose-200' : 'bg-rose-100'
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors ${isDragging ? 'bg-rose-200' : 'bg-rose-100'
                     }`}>
-                    <Camera size={24} className="text-rose-600" />
+                    <Camera size={26} className="text-rose-600" />
                   </div>
-                  <span className={`text-sm transition-colors ${isDragging ? 'text-rose-600 font-semibold' : 'text-slate-600'
+                  <span className={`text-sm sm:text-base transition-colors ${isDragging ? 'text-rose-600 font-semibold' : 'text-slate-700 font-medium'
                     }`}>
                     {isDragging ? '여기에 사진을 놓으세요' : '사진을 선택하거나 드래그, 또는 복사한 사진을 붙여넣기(Ctrl+V)하세요'}
                   </span>
                   {/* [한글 코멘트] 앨범 작성 안내 텍스트: 최대 50장, 개별 5MB 및 초과시 자동 리사이징/압축 표기 */}
-                  <span className="text-xs text-slate-400">최대 50장, 파일당 5MB 한도 (5MB 초과 원본은 5MB 이하로 자동 압축)</span>
+                  <span className="text-xs text-slate-500">최대 50장, 파일당 5MB 한도 (5MB 초과 원본은 5MB 이하로 자동 압축)</span>
                   <span className="text-xs text-slate-400">여러 파일을 동시에 선택, 드래그, 또는 Ctrl+V로 붙여넣을 수 있습니다</span>
                 </label>
               </div>
               {uploading && (
-                <div className="mt-2 text-sm text-rose-600">사진 업로드 중...</div>
+                <div className="mt-3 flex items-center justify-center gap-2 text-sm text-rose-600 font-medium">
+                  <div className="w-4 h-4 border-2 border-rose-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span>사진 업로드 중...</span>
+                </div>
               )}
             </div>
 
             {/* 버튼 */}
-            <div className="flex gap-3 pt-4">
+            <div className="flex gap-3 pt-4 border-t border-slate-100">
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-colors"
+                className="flex-1 px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
               >
                 취소
               </button>
               <button
                 type="submit"
                 disabled={loading || uploading}
-                className="flex-1 px-6 py-3 bg-rose-500 text-white rounded-xl font-semibold hover:bg-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-6 py-3 bg-rose-500 text-white rounded-xl font-semibold hover:bg-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md"
               >
                 {loading ? '작성 중...' : '작성하기'}
               </button>
