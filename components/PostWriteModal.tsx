@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, GripVertical, RotateCw, Camera, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
 import { createPost, BoardCategory, uploadImage, getTags, Tag } from '../services/boardApi';
-import { getUserInfo, hasRole, getCurrentUser } from '../services/authApi';
+import { getUserInfo, hasRole, getCurrentUser, syncSession } from '../services/authApi';
 import { useModalBackButton } from '../hooks/useModalBackButton';
 import TagManagementModal from './TagManagementModal';
 import AlertModal from './AlertModal';
@@ -129,16 +129,29 @@ const PostWriteModal: React.FC<PostWriteModalProps> = ({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, formData, imageFiles]);
 
-  // selectedCategoryId가 변경되면 formData 업데이트
+  // selectedCategoryId 또는 isOpen이 변경되면 formData 업데이트 및 세션 실시간 동기화
   useEffect(() => {
-    if (isOpen && selectedCategoryId) {
-      const userInfo = getUserInfo();
-      setFormData(prev => ({
-        ...prev,
-        category_id: selectedCategoryId,
-        // 로그인한 상태이면 작성자 이름 자동 입력 (닉네임 우선, 없으면 이름)
-        author_name: userInfo?.nickname || userInfo?.name || prev.author_name
-      }));
+    if (isOpen) {
+      // [한글 코멘트] 모달 열릴 때 백그라운드로 30일 토큰 자동 갱신 및 최신 사용자 정보 동기화
+      syncSession().then((syncedUser) => {
+        const activeUser = syncedUser || getUserInfo();
+        setUser(activeUser);
+        if (activeUser) {
+          setFormData(prev => ({
+            ...prev,
+            author_name: activeUser.nickname || activeUser.name || prev.author_name
+          }));
+        }
+      }).catch(() => {});
+
+      if (selectedCategoryId) {
+        const userInfo = getUserInfo();
+        setFormData(prev => ({
+          ...prev,
+          category_id: selectedCategoryId,
+          author_name: userInfo?.nickname || userInfo?.name || prev.author_name
+        }));
+      }
     }
   }, [isOpen, selectedCategoryId]);
   const [loading, setLoading] = useState(false);
@@ -870,7 +883,13 @@ const PostWriteModal: React.FC<PostWriteModalProps> = ({
         postData.tags = selectedTags;
       }
 
+      // [한글 코멘트] 게시글 등록 직전 세션 토큰 유효성 최종 갱신 (토큰 만료 원천 차단)
+      await syncSession().catch(() => {});
+
       await createPost(postData);
+
+      // 성공 시 임시 보관된 글 삭제
+      localStorage.removeItem('draft_post_backup');
 
       // 폼 초기화 (작성자 이름은 로그인 상태면 유지 - 닉네임 우선, 없으면 이름)
       const userInfo = getUserInfo();
@@ -897,7 +916,20 @@ const PostWriteModal: React.FC<PostWriteModalProps> = ({
       onSuccess();
       onClose();
     } catch (err: any) {
-      setError(err.message || '게시글 작성에 실패했습니다.');
+      const errMsg = err.message || '게시글 작성에 실패했습니다.';
+      // [한글 코멘트] 토큰이나 세션 관련 오류 발생 시 작성 중이던 내용을 임시 보존
+      if (errMsg.includes('토큰') || errMsg.includes('세션') || errMsg.includes('로그인')) {
+        try {
+          localStorage.setItem('draft_post_backup', JSON.stringify({
+            title: formData.title,
+            content: finalContent,
+            savedAt: new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+          }));
+        } catch (e) {}
+        setError('로그인 세션이 만료되었습니다. 작성 중인 글은 브라우저에 임시 보관되었으니 다시 로그인 후 등록해 주세요.');
+      } else {
+        setError(errMsg);
+      }
     } finally {
       setLoading(false);
     }

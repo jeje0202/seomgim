@@ -9,7 +9,7 @@ import { ChurchLogo } from './components/ChurchLogo';
 import AlertModal from './components/AlertModal';
 import { NavSection, ServiceTime } from './types';
 import { MapPin, Phone, Clock, Mail, Globe, Users, HandHeart, Flower2, PhoneCall } from 'lucide-react';
-import { getUserInfo, logout, User } from './services/authApi';
+import { getUserInfo, logout, syncSession, User } from './services/authApi';
 import { trackActivity } from './services/activityApi';
 // [한글 코멘트] 슈퍼관리자 전용 SQLite CMS 연동 커스텀 훅 및 편집 래퍼/모달 컴포넌트 임포트
 import { useCmsContent } from './hooks/useCmsContent';
@@ -19,8 +19,6 @@ import { CmsSectionItem } from './services/cmsApi';
 
 const App: React.FC = () => {
   const [activeSection, setActiveSection] = useState<NavSection>(NavSection.HOME);
-  const lastActivityTimeRef = useRef<number>(Date.now());
-  const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean;
     message: string;
@@ -77,9 +75,6 @@ const App: React.FC = () => {
     });
   };
 
-  // 세션 타임아웃 시간 (30분 = 1800000ms)
-  const SESSION_TIMEOUT = 30 * 60 * 1000;
-
   const scrollToSection = (id: string) => {
     const element = document.getElementById(id);
     if (element) {
@@ -111,99 +106,60 @@ const App: React.FC = () => {
     });
   };
 
-  // 활동 감지 및 세션 타임아웃 처리
+  // [한글 코멘트] 로그인 세션 유지 (1달 / 30d) 및 앱 시작/포커스 복귀 시 자동 슬라이딩 갱신
   useEffect(() => {
-    const user = getUserInfo();
-
-    // 로그인한 사용자가 없으면 세션 타임아웃 체크 불필요
-    if (!user) {
-      return;
-    }
-
-    // 활동 감지 이벤트 리스너
-    const updateActivity = () => {
-      lastActivityTimeRef.current = Date.now();
-      resetTimeout();
+    // 1. 앱 마운트 시 세션 유효성 검증 및 30일 토큰 자동 연장
+    const checkAndSyncSession = async () => {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        const user = await syncSession();
+        if (user) {
+          setCurrentUser(user);
+        }
+      }
     };
 
-    // 세션 타임아웃 타이머 리셋
-    const resetTimeout = () => {
-      // 기존 타이머 제거
-      if (timeoutIdRef.current) {
-        clearTimeout(timeoutIdRef.current);
+    checkAndSyncSession();
+
+    // 2. 브라우저 탭 활성화(visibilitychange) 및 창 포커스 시 최신 세션 동기화 (앱을 며칠 뒤 켰을 때도 즉시 연장)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndSyncSession();
       }
-
-      // 새로운 타이머 설정
-      timeoutIdRef.current = setTimeout(() => {
-        const timeSinceLastActivity = Date.now() - lastActivityTimeRef.current;
-
-        // 30분 이상 활동이 없으면 로그아웃
-        if (timeSinceLastActivity >= SESSION_TIMEOUT) {
-          logout().then(() => {
-            setAlertModal({
-              isOpen: true,
-              message: '30분간 활동이 없어 자동으로 로그아웃되었습니다.',
-              type: 'info',
-              onConfirm: () => {
-                window.location.reload();
-              }
-            });
-          });
-        }
-      }, SESSION_TIMEOUT);
+    };
+    const handleWindowFocus = () => {
+      checkAndSyncSession();
     };
 
-    // 활동 감지 이벤트 등록
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
-    events.forEach(event => {
-      document.addEventListener(event, updateActivity, true);
-    });
+    // 3. 사용자 정보 변경 및 수동 로그아웃 이벤트 리스너
+    const handleUserChanged = (e: any) => {
+      setCurrentUser(e.detail || getUserInfo());
+    };
+    const handleAuthLogout = () => {
+      setCurrentUser(null);
+    };
 
-    // 초기 타이머 설정
-    resetTimeout();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('auth:user-changed', handleUserChanged);
+    window.addEventListener('auth:logout', handleAuthLogout);
 
-    // 주기적으로 활동 시간 체크 (1분마다)
-    const checkInterval = setInterval(() => {
-      const currentUser = getUserInfo();
-      if (!currentUser) {
-        clearInterval(checkInterval);
-        if (timeoutIdRef.current) {
-          clearTimeout(timeoutIdRef.current);
-        }
-        return;
+    // 4. 앱이 켜져 있는 동안 1시간마다 슬라이딩 갱신 (토큰 만료 원천 방지)
+    const refreshInterval = setInterval(() => {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        checkAndSyncSession();
       }
+    }, 60 * 60 * 1000); // 1시간 주기
 
-      const timeSinceLastActivity = Date.now() - lastActivityTimeRef.current;
-
-      // 30분 이상 활동이 없으면 로그아웃
-      if (timeSinceLastActivity >= SESSION_TIMEOUT) {
-        clearInterval(checkInterval);
-        if (timeoutIdRef.current) {
-          clearTimeout(timeoutIdRef.current);
-        }
-        logout();
-        setAlertModal({
-          isOpen: true,
-          message: '30분간 활동이 없어 자동으로 로그아웃되었습니다.',
-          type: 'info',
-          onConfirm: () => {
-            window.location.reload();
-          }
-        });
-      }
-    }, 60000); // 1분마다 체크
-
-    // 클린업
     return () => {
-      events.forEach(event => {
-        document.removeEventListener(event, updateActivity, true);
-      });
-      if (timeoutIdRef.current) {
-        clearTimeout(timeoutIdRef.current);
-      }
-      clearInterval(checkInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('auth:user-changed', handleUserChanged);
+      window.removeEventListener('auth:logout', handleAuthLogout);
+      clearInterval(refreshInterval);
     };
-  }, []); // 컴포넌트 마운트 시 한 번만 실행
+  }, []);
 
   const serviceTimes: ServiceTime[] = [
     { name: '주일 오전예배', time: '오전 11:00', location: '본당' },

@@ -5,7 +5,7 @@ import { getCategories, getPosts, BoardCategory, Post, deletePostAsAdmin, getTag
 import PostWriteModal from './PostWriteModal';
 import PostDetailModal from './PostDetailModal';
 import SurveySection from './SurveySection';
-import { getUserInfo, hasRole, User as UserType } from '../services/authApi';
+import { getUserInfo, hasRole, syncSession, User as UserType } from '../services/authApi';
 import AlertModal from './AlertModal';
 import TagManagementModal from './TagManagementModal';
 import ImageViewerModal from './ImageViewerModal';
@@ -119,6 +119,14 @@ const BoardSection: React.FC = () => {
     };
     window.addEventListener('auth:logout', handleLogout);
 
+    // [한글 코멘트] 사용자 정보(is_member 성도 권한 등) 변경 감지 이벤트
+    const handleUserChanged = (e: any) => {
+      const updatedUser = e.detail || getUserInfo();
+      setUser(updatedUser);
+      getCategories().then(setCategories).catch(() => {});
+    };
+    window.addEventListener('auth:user-changed', handleUserChanged);
+
     // 주기적으로 사용자 정보 확인 (같은 탭에서 로그인/로그아웃 시)
     const userCheckInterval = setInterval(() => {
       const currentUserInfo = getUserInfo();
@@ -166,6 +174,7 @@ const BoardSection: React.FC = () => {
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('auth:logout', handleLogout);
+      window.removeEventListener('auth:user-changed', handleUserChanged);
       clearInterval(userCheckInterval);
     };
   }, [showTagManagementModal]);
@@ -469,8 +478,57 @@ const BoardSection: React.FC = () => {
             const isAdmin = user && hasRole(user, 'admin', 'super-admin');
             const isMember = user && (user.is_member === true || user.is_member === 1); // null 체크 후 is_member 확인
             const canAccessPrivate = isAdmin || isMember; // 관리자 이상이거나 교인 등록 사용자
-            const isDisabled = isPrivate && !canAccessPrivate; // 성도 전용이고 접근 권한이 없으면 비활성화
             const isMemberBoard = category.category_code === 'member';
+
+            // [한글 코멘트] 카테고리 탭 클릭 핸들러: 비공개/성도게시판 클릭 시 실시간 세션 동기화 및 모달 안내
+            const handleCategoryClick = async () => {
+              if (isPrivate) {
+                // 1. 로그인하지 않은 경우
+                if (!user) {
+                  setErrorModal({
+                    isOpen: true,
+                    message: '성도(교인) 전용 게시판입니다. 먼저 로그인해 주세요.'
+                  });
+                  return;
+                }
+
+                // 2. 권한이 없는 경우, 서버와 실시간 세션 동기화 시도 (관리자 방금 승인 여부 즉시 확인)
+                let currentCanAccess = isAdmin || isMember;
+                if (!currentCanAccess) {
+                  try {
+                    const latestUser = await syncSession();
+                    if (latestUser) {
+                      setUser(latestUser);
+                      const latestIsAdmin = hasRole(latestUser, 'admin', 'super-admin');
+                      const latestIsMember = latestUser.is_member === true || latestUser.is_member === 1;
+                      currentCanAccess = latestIsAdmin || latestIsMember;
+                    }
+                  } catch (e) {
+                    console.error('권한 동기화 오류:', e);
+                  }
+                }
+
+                // 3. 동기화 후에도 교인 권한이 없으면 안내 모달 표시
+                if (!currentCanAccess) {
+                  setErrorModal({
+                    isOpen: true,
+                    message: '성도(교인) 전용 게시판입니다. 교인 등록 승인을 원하시면 교회 관리자에게 문의해 주세요.'
+                  });
+                  return;
+                }
+              }
+
+              // 정상적으로 해당 카테고리 선택
+              setSelectedCategory(category.category_id);
+              setCurrentPage(1);
+              setSearchQuery('');
+              setDebouncedSearch('');
+              // 성도전용게시판 선택 시 기본 탭 설정 및 태그 선택 초기화
+              if (isMemberBoard) {
+                setMemberBoardSubTab('member');
+                setSelectedTags([]);
+              }
+            };
 
             // 성도전용게시판인 경우 성도게시판과 기관게시판의 글 개수 합계 계산
             let displayPostCount = category.post_count;
@@ -484,27 +542,14 @@ const BoardSection: React.FC = () => {
             return (
               <div key={category.category_id} className="flex flex-col gap-2">
                 <button
-                  onClick={() => {
-                    if (!isDisabled) {
-                      setSelectedCategory(category.category_id);
-                      setCurrentPage(1);
-                      setSearchQuery('');
-                      setDebouncedSearch('');
-                      // 성도전용게시판 선택 시 기본 탭 설정 및 태그 선택 초기화
-                      if (isMemberBoard) {
-                        setMemberBoardSubTab('member');
-                        setSelectedTags([]);
-                      }
-                    }
-                  }}
-                  disabled={isDisabled}
-                  className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 relative ${isDisabled
-                    ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                  onClick={handleCategoryClick}
+                  className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 relative ${isPrivate && !canAccessPrivate
+                    ? 'bg-slate-50 text-slate-500 border border-slate-200 hover:border-teal-300 hover:bg-teal-50'
                     : selectedCategory === category.category_id || (isMemberBoard && (selectedCategory === categories.find(c => c.category_code === 'organization')?.category_id))
                       ? 'bg-teal-500 text-white shadow-lg scale-105'
                       : 'bg-white text-slate-700 border border-slate-200 hover:border-teal-300 hover:bg-teal-50'
                     }`}
-                  title={isDisabled ? '성도전용 게시판입니다. 관리자 권한 이상이거나 교인으로 등록된 사용자만 이용할 수 있습니다.' : undefined}
+                  title={isPrivate && !canAccessPrivate ? '성도(교인) 전용 게시판입니다. 클릭 시 권한을 확인합니다.' : undefined}
                 >
                   <span className="flex items-center gap-2 relative">
                     {category.category_name}
@@ -519,8 +564,8 @@ const BoardSection: React.FC = () => {
                     )}
                     {/* 열쇠 아이콘 (텍스트 뒤) */}
                     {(category.is_private === true || category.is_private === 1) && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${isDisabled
-                        ? 'bg-slate-200 text-slate-500'
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${isPrivate && !canAccessPrivate
+                        ? 'bg-slate-200 text-slate-600'
                         : selectedCategory === category.category_id || (isMemberBoard && (selectedCategory === categories.find(c => c.category_code === 'organization')?.category_id))
                           ? 'bg-white/20 text-white'
                           : 'bg-rose-100 text-rose-600'
@@ -532,7 +577,7 @@ const BoardSection: React.FC = () => {
                 </button>
 
                 {/* 성도전용게시판 내부 탭 (성도전용게시판이 선택되었거나 기관게시판이 선택되었을 때 표시) */}
-                {isMemberBoard && !isDisabled && (() => {
+                {isMemberBoard && canAccessPrivate && (() => {
                   const orgCategory = categories.find(c => c.category_code === 'organization');
                   const isMemberSelected = selectedCategory === category.category_id;
                   const isOrgSelected = orgCategory && selectedCategory === orgCategory.category_id;

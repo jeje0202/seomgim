@@ -8,8 +8,8 @@ const { body, validationResult, param, query } = require('express-validator');
 const { authenticate, authorize } = require('../middleware/auth');
 
 // JWT 시크릿 키 (환경 변수 또는 기본값)
-const JWT_SECRET = process.env.JWT_SECRET || 'seomgim-church-secret-key-change-in-production';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+// [한글 코멘트] 로그인 세션 유지 시간: 기본 30일(1달)로 설정하여 장기 세션 유지 지원
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
 
 // ========== 회원가입 ==========
 router.post('/register',
@@ -230,44 +230,145 @@ router.post('/login',
   }
 );
 
-// ========== 토큰 검증 ==========
+// ========== 토큰 검증 및 자동 세션 연장 (Sliding Session) ==========
 router.get('/verify', async (req, res) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
     
     if (!token) {
-      return res.status(401).json({ success: false, message: '토큰이 없습니다.' });
+      return res.status(401).json({ success: false, code: 'NO_TOKEN', message: '토큰이 없습니다.' });
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
     const pool = getPool();
 
-    // 사용자 정보 조회
+    // 사용자 최신 정보 조회 (is_member, role 등)
     const [users] = await pool.query(
       'SELECT user_id, username, nickname, name, role, is_active, is_member FROM users WHERE user_id = ?',
       [decoded.user_id]
     );
 
     if (users.length === 0 || !users[0].is_active) {
-      return res.status(401).json({ success: false, message: '유효하지 않은 토큰입니다.' });
+      return res.status(401).json({ success: false, code: 'INVALID_USER', message: '유효하지 않은 계정입니다.' });
     }
+
+    const user = users[0];
+
+    // [한글 코멘트] 세션 자동 연장: 검증 성공 시 30일 유효기간의 갱신 토큰을 발급하여 세션을 무중단 유지
+    const refreshedToken = jwt.sign(
+      { 
+        user_id: user.user_id, 
+        username: user.username, 
+        role: user.role,
+        name: user.name,
+        nickname: user.nickname,
+        session_id: decoded.session_id || null
+      },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
 
     res.json({
       success: true,
       data: {
-        user_id: users[0].user_id,
-        username: users[0].username,
-        nickname: users[0].nickname,
-        name: users[0].name,
-        role: users[0].role,
-        is_member: users[0].is_member || false
+        user_id: user.user_id,
+        username: user.username,
+        nickname: user.nickname,
+        name: user.name,
+        role: user.role,
+        is_member: user.is_member || false,
+        token: refreshedToken // 갱신된 30일 토큰 반환
       }
     });
   } catch (error) {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-      return res.status(401).json({ success: false, message: '유효하지 않은 토큰입니다.' });
+      return res.status(401).json({ 
+        success: false, 
+        code: error.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN', 
+        message: '로그인 세션이 만료되었습니다. 다시 로그인해주세요.' 
+      });
     }
     console.error('토큰 검증 오류:', error);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ========== 토큰 갱신 엔드포인트 (Sliding Session) ==========
+router.post('/refresh', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({ success: false, code: 'NO_TOKEN', message: '토큰이 없습니다.' });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (jwtErr) {
+      // 만료된 토큰이더라도 페이로드를 디코딩하여 만료 후 7일 이내라면 안전하게 재발급 허용
+      if (jwtErr.name === 'TokenExpiredError') {
+        decoded = jwt.decode(token);
+        if (!decoded || !decoded.exp) {
+          return res.status(401).json({ success: false, code: 'TOKEN_EXPIRED', message: '로그인 세션이 만료되었습니다.' });
+        }
+        // 만료 후 7일 초과 시 완전 만료 처리
+        const expiredAgoSeconds = Math.floor(Date.now() / 1000) - decoded.exp;
+        const GRACE_PERIOD = 7 * 24 * 60 * 60; // 7일 유예기간
+        if (expiredAgoSeconds > GRACE_PERIOD) {
+          return res.status(401).json({ success: false, code: 'TOKEN_EXPIRED', message: '로그인 세션이 만료되었습니다.' });
+        }
+      } else {
+        return res.status(401).json({ success: false, code: 'INVALID_TOKEN', message: '유효하지 않은 토큰입니다.' });
+      }
+    }
+
+    if (!decoded || !decoded.user_id) {
+      return res.status(401).json({ success: false, code: 'INVALID_TOKEN', message: '유효하지 않은 토큰입니다.' });
+    }
+
+    const pool = getPool();
+    // 사용자 최신 상태 조회
+    const [users] = await pool.query(
+      'SELECT user_id, username, nickname, name, role, is_active, is_member FROM users WHERE user_id = ?',
+      [decoded.user_id]
+    );
+
+    if (users.length === 0 || !users[0].is_active) {
+      return res.status(401).json({ success: false, code: 'USER_INACTIVE', message: '유효하지 않은 계정입니다.' });
+    }
+
+    const user = users[0];
+
+    // 새 30일 토큰 발급
+    const newToken = jwt.sign(
+      { 
+        user_id: user.user_id, 
+        username: user.username, 
+        role: user.role,
+        name: user.name,
+        nickname: user.nickname,
+        session_id: decoded.session_id || null
+      },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    res.json({
+      success: true,
+      data: {
+        user_id: user.user_id,
+        username: user.username,
+        nickname: user.nickname,
+        name: user.name,
+        role: user.role,
+        is_member: user.is_member || false,
+        token: newToken
+      },
+      message: '세션이 갱신되었습니다.'
+    });
+  } catch (error) {
+    console.error('세션 갱신 오류:', error);
     res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.' });
   }
 });

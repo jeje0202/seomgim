@@ -22,15 +22,15 @@ try {
     Write-Host "pm2 초기화 중..." -ForegroundColor Yellow
 }
 
-# 기존 프로세스 중지
+# 기존 프로세스 중지 및 재시작
 Write-Host ""
-Write-Host "기존 seomgim 프로세스 중지 중..." -ForegroundColor Yellow
-pm2 delete seomgim 2>&1 | Out-Null
-
-# 서버 시작
-Write-Host ""
-Write-Host "백엔드 서버 시작 중..." -ForegroundColor Yellow
-pm2 start index.js --name seomgim
+Write-Host "seomgim 프로세스 재시작 중..." -ForegroundColor Yellow
+pm2 restart seomgim-church-backend 2>&1 | Out-Null
+pm2 restart seomgim 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Set-Location -Path "$PSScriptRoot"
+    pm2 start ecosystem.config.cjs
+}
 
 # 상태 확인
 Write-Host ""

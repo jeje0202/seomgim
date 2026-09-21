@@ -43,7 +43,8 @@ exports.authenticate = async (req, res, next) => {
     if (users.length === 0 || !users[0].is_active) {
       return res.status(401).json({ 
         success: false, 
-        message: '유효하지 않은 토큰입니다.' 
+        code: 'INVALID_USER',
+        message: '유효하지 않은 계정입니다.' 
       });
     }
 
@@ -54,7 +55,8 @@ exports.authenticate = async (req, res, next) => {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
       return res.status(401).json({ 
         success: false, 
-        message: '유효하지 않은 토큰입니다.' 
+        code: error.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+        message: error.name === 'TokenExpiredError' ? '로그인 세션이 만료되었습니다. 다시 로그인해주세요.' : '유효하지 않은 토큰입니다.' 
       });
     }
     console.error('인증 미들웨어 오류:', error);

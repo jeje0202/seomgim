@@ -47,14 +47,21 @@ const Header: React.FC<HeaderProps> = ({ activeSection, onNavigate }) => {
       setUser(null);
     };
 
+    // [한글 코멘트] 사용자 정보(is_member, 닉네임 등) 실시간 변경 감지
+    const handleUserChanged = (e: any) => {
+      setUser(e.detail || getUserInfo());
+    };
+
     // 이벤트 리스너 등록
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('auth:logout', handleAuthLogout);
+    window.addEventListener('auth:user-changed', handleUserChanged);
 
     // 클린업
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('auth:logout', handleAuthLogout);
+      window.removeEventListener('auth:user-changed', handleUserChanged);
     };
   }, []);
 

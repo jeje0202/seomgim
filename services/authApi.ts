@@ -233,7 +233,7 @@ export const logout = async (): Promise<void> => {
   window.dispatchEvent(new CustomEvent('auth:logout'));
 };
 
-// 토큰 검증
+// [한글 코멘트] 토큰 검증 및 30일 슬라이딩 세션 자동 연장
 export const verifyToken = async (): Promise<boolean> => {
   try {
     const token = getToken();
@@ -245,11 +245,49 @@ export const verifyToken = async (): Promise<boolean> => {
       }
     });
 
+    if (!response.ok) {
+      return false;
+    }
+
     const result = await response.json();
-    return result.success === true;
+    if (result.success && result.data) {
+      // 새 30일 토큰이 오면 갱신
+      if (result.data.token) {
+        setToken(result.data.token);
+      }
+      // 최신 사용자 정보(is_member 성도 여부 포함) 갱신
+      setUserInfo({
+        user_id: result.data.user_id,
+        username: result.data.username,
+        nickname: result.data.nickname,
+        name: result.data.name,
+        role: result.data.role as any,
+        is_active: true,
+        is_member: result.data.is_member === true || result.data.is_member === 1
+      });
+      return true;
+    }
+    return false;
   } catch (error) {
     console.error('토큰 검증 오류:', error);
     return false;
+  }
+};
+
+// [한글 코멘트] 세션 및 권한 실시간 동기화 함수 (앱 시작 시, 포커스 시, 게시판 진입 시 호출)
+export const syncSession = async (): Promise<User | null> => {
+  try {
+    const token = getToken();
+    if (!token) return null;
+
+    const isValid = await verifyToken();
+    if (isValid) {
+      return getUserInfo();
+    }
+    return null;
+  } catch (error) {
+    console.error('세션 동기화 오류:', error);
+    return getUserInfo();
   }
 };
 
@@ -267,8 +305,12 @@ export const getCurrentUser = async (): Promise<User | null> => {
 
     const result = await response.json();
     if (result.success && result.data) {
-      setUserInfo(result.data);
-      return result.data;
+      const updatedUser: User = {
+        ...result.data,
+        is_member: result.data.is_member === true || result.data.is_member === 1
+      };
+      setUserInfo(updatedUser);
+      return updatedUser;
     }
     return null;
   } catch (error) {
