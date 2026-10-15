@@ -6,6 +6,9 @@ import NewsWriteModal from './NewsWriteModal';
 import NewsEditModal from './NewsEditModal';
 import NewsDeleteModal from './NewsDeleteModal';
 import NewsDetailModal from './NewsDetailModal';
+// [한글 코멘트] 교회소식 딥링크(?news=) 파싱 및 SEO 메타태그 초기화 유틸리티 임포트
+import { getDeepLinkParams, clearDeepLinkParams } from '../utils/deepLink';
+import { resetMetaTags } from '../utils/seo';
 
 const NewsSection: React.FC = () => {
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
@@ -23,6 +26,19 @@ const NewsSection: React.FC = () => {
     loadNews();
     const userInfo = getUserInfo();
     setUser(userInfo);
+
+    // [한글 코멘트] 공유 링크(?news=번호)로 접속한 경우 해당 교회소식 상세 모달을 즉시 오픈
+    const checkNewsDeepLink = () => {
+      const { newsId } = getDeepLinkParams();
+      if (newsId) {
+        setSelectedNewsId(newsId);
+        setShowDetailModal(true);
+      }
+    };
+
+    checkNewsDeepLink();
+    window.addEventListener('popstate', checkNewsDeepLink);
+    return () => window.removeEventListener('popstate', checkNewsDeepLink);
   }, []);
 
   const loadNews = async () => {
@@ -217,6 +233,9 @@ const NewsSection: React.FC = () => {
         onClose={() => {
           setShowDetailModal(false);
           setSelectedNewsId(null);
+          // [한글 코멘트] 모달을 닫을 때 주소창의 ?news 파라미터 제거 및 기본 SEO 메타태그 복원
+          clearDeepLinkParams(['news']);
+          resetMetaTags();
         }}
         newsId={selectedNewsId || 0}
         onUpdate={() => {

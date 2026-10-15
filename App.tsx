@@ -16,6 +16,8 @@ import { useCmsContent } from './hooks/useCmsContent';
 import EditableSection from './components/EditableSection';
 import SectionEditModal from './components/SectionEditModal';
 import { CmsSectionItem } from './services/cmsApi';
+// [한글 코멘트] 딥링크(개별 URL 공유) 파싱 및 주소창 동기화 유틸리티 임포트
+import { getDeepLinkParams, setDeepLinkParams } from './utils/deepLink';
 
 const App: React.FC = () => {
   const [activeSection, setActiveSection] = useState<NavSection>(NavSection.HOME);
@@ -85,9 +87,46 @@ const App: React.FC = () => {
     }
   };
 
+  // [한글 코멘트] 초기 진입 및 브라우저 뒤로/앞으로가기 시 딥링크 파라미터(?news, ?post, ?board, ?album, ?section) 감지하여 해당 섹션으로 이동
+  useEffect(() => {
+    const applyDeepLinkNavigation = () => {
+      const { section, newsId, postId, boardCode, albumId } = getDeepLinkParams();
+      let targetSection: NavSection | null = null;
+
+      if (newsId) {
+        targetSection = NavSection.NEWS;
+      } else if (postId || boardCode) {
+        targetSection = NavSection.BOARD;
+      } else if (albumId) {
+        targetSection = NavSection.ALBUM;
+      } else if (section && Object.values(NavSection).includes(section as NavSection)) {
+        targetSection = section as NavSection;
+      }
+
+      if (targetSection) {
+        setActiveSection(targetSection);
+        setTimeout(() => {
+          scrollToSection(targetSection!);
+        }, 150);
+      }
+    };
+
+    applyDeepLinkNavigation();
+    window.addEventListener('popstate', applyDeepLinkNavigation);
+    return () => window.removeEventListener('popstate', applyDeepLinkNavigation);
+  }, []);
+
   const handleNavNavigate = (section: NavSection) => {
     setActiveSection(section);
     scrollToSection(section);
+
+    // [한글 코멘트] 네비게이션 메뉴 클릭 시 주소창에 섹션 딥링크 반영 (홈일 때는 깔끔하게 제거)
+    setDeepLinkParams({
+      section: section === NavSection.HOME ? null : section,
+      news: null,
+      post: null,
+      album: null
+    });
 
     // 활동 추적 (메뉴 클릭)
     const sectionNames: { [key: string]: string } = {

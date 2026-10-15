@@ -8,6 +8,10 @@ import AlertModal from './AlertModal';
 import ImageViewerModal from './ImageViewerModal';
 import { createPortal } from 'react-dom';
 import { useModalBackButton } from '../hooks/useModalBackButton';
+// [한글 코멘트] 사진첩 딥링크(?album=), 공유하기 버튼 및 동적 SEO 메타태그 유틸리티 임포트
+import ShareButton from './ShareButton';
+import { getDeepLinkParams, setDeepLinkParams, clearDeepLinkParams, buildShareUrl } from '../utils/deepLink';
+import { updateMetaTags, resetMetaTags } from '../utils/seo';
 
 const AlbumSection: React.FC = () => {
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -20,6 +24,14 @@ const AlbumSection: React.FC = () => {
   const [selectedAlbum, setSelectedAlbum] = useState<AlbumDetail | null>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState<number | null>(null);
   const [editingAlbum, setEditingAlbum] = useState<AlbumDetail | null>(null);
+  // [한글 코멘트] 브라우저 기본 alert() 대신 모달창으로 오류 안내를 표시하기 위한 상태
+  const [errorAlertModal, setErrorAlertModal] = useState<{
+    isOpen: boolean;
+    message: string;
+  }>({
+    isOpen: false,
+    message: ''
+  });
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
@@ -56,6 +68,20 @@ const AlbumSection: React.FC = () => {
     }
   }, [currentPage, debouncedSearch]);
 
+  // [한글 코멘트] 공유 링크(?album=번호)로 접속하거나 뒤로/앞으로가기 시 해당 앨범 상세 모달 자동 오픈
+  useEffect(() => {
+    const checkAlbumDeepLink = () => {
+      const { albumId } = getDeepLinkParams();
+      if (albumId) {
+        handleAlbumClick(albumId);
+      }
+    };
+
+    checkAlbumDeepLink();
+    window.addEventListener('popstate', checkAlbumDeepLink);
+    return () => window.removeEventListener('popstate', checkAlbumDeepLink);
+  }, []);
+
   const loadAlbums = async () => {
     setLoading(true);
     try {
@@ -80,6 +106,17 @@ const AlbumSection: React.FC = () => {
       const album = await getAlbumDetail(albumId);
       setSelectedAlbum(album);
       setShowDetailModal(true);
+
+      // [한글 코멘트] 사진첩 상세 진입 시 주소창 딥링크(?album=번호) 동기화 및 동적 SEO 메타태그 업데이트
+      setDeepLinkParams({ section: 'album', album: album.album_id });
+      const shareUrl = buildShareUrl({ section: 'album', album: album.album_id });
+      const firstPhoto = album.photos?.[0]?.thumbnail_url || album.photos?.[0]?.photo_url;
+      updateMetaTags(
+        `[은혜의 순간들] ${album.title}`,
+        album.description || `창원섬김의교회 은혜의 순간들 사진첩 (${album.photos?.length || 0}장)`,
+        firstPhoto,
+        shareUrl
+      );
     } catch (error) {
       console.error('앨범 상세 조회 오류:', error);
     }
@@ -120,7 +157,12 @@ const AlbumSection: React.FC = () => {
       loadAlbums();
     } catch (error: any) {
       console.error('앨범 삭제 오류:', error);
-      alert(error.message || '앨범 삭제에 실패했습니다.');
+      // [한글 코멘트] 사용자 규칙 준수: 브라우저 기본 alert() 대신 모달창(AlertModal)으로 오류 메시지 표시
+      setShowDeleteModal(false);
+      setErrorAlertModal({
+        isOpen: true,
+        message: error.message || '앨범 삭제에 실패했습니다.'
+      });
     }
   };
 
@@ -401,6 +443,9 @@ const AlbumSection: React.FC = () => {
           onClose={() => {
             setShowDetailModal(false);
             setSelectedAlbum(null);
+            // [한글 코멘트] 앨범 상세 모달 닫기 시 ?album 파라미터 제거 및 기본 메타태그 복원
+            clearDeepLinkParams(['album']);
+            resetMetaTags();
             loadAlbums(); // 조회수 반영을 위해 목록 갱신
           }}
           album={selectedAlbum}
@@ -453,6 +498,16 @@ const AlbumSection: React.FC = () => {
           setShowDeleteModal(false);
           setSelectedAlbumId(null);
         }}
+      />
+
+      {/* [한글 코멘트] 앨범 삭제 오류 안내 모달 (브라우저 기본 alert 대체) */}
+      <AlertModal
+        isOpen={errorAlertModal.isOpen}
+        onClose={() => setErrorAlertModal({ isOpen: false, message: '' })}
+        title="알림"
+        message={errorAlertModal.message}
+        type="error"
+        confirmText="확인"
       />
 
       {/* [한글 코멘트] 사용자 요청: 이미지 뷰어에 앨범 제목 및 단위('장') 전달 */}
@@ -545,7 +600,17 @@ const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
 
       {/* 헤더 영역 - 고정 (전체 화면 너비 활용) */}
       <div className="flex-shrink-0 px-4 sm:px-8 md:px-12 pt-6 md:pt-8 pb-4 border-b border-slate-200 relative bg-white pr-16 md:pr-24 shadow-sm">
-        <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-800 mb-2 sm:mb-3 truncate">{album.title}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-2 sm:mb-3">
+          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-800 truncate">{album.title}</h2>
+          {/* [한글 코멘트] 사진첩 상세 모달 공유하기 버튼 배치 */}
+          <ShareButton
+            title={album.title}
+            description={album.description || `총 ${album.photos.length}장의 은혜로운 사진이 담긴 앨범입니다.`}
+            shareUrl={buildShareUrl({ section: 'album', album: album.album_id })}
+            categoryLabel="은혜의 순간들 사진첩"
+            variant="compact"
+          />
+        </div>
         {album.description && (
           <p className="text-xs sm:text-sm md:text-base text-slate-600 mb-3 whitespace-pre-wrap">{album.description}</p>
         )}

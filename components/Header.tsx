@@ -141,7 +141,7 @@ const Header: React.FC<HeaderProps> = ({ activeSection, onNavigate }) => {
     onNavigate(section);
     setIsMenuOpen(false);
     
-    // 활동 추적 (메뉴 클릭)
+    // [한글 코멘트] 활동 추적 (메뉴 클릭) - '은혜의 순간들(ALBUM)' 누락 항목 추가
     const sectionNames: { [key: string]: string } = {
       [NavSection.HOME]: '홈',
       [NavSection.ABOUT]: '교회소개',
@@ -149,6 +149,7 @@ const Header: React.FC<HeaderProps> = ({ activeSection, onNavigate }) => {
       [NavSection.MEDIA]: '말씀과 찬양',
       [NavSection.NEWS]: '교회소식',
       [NavSection.BOARD]: '게시판',
+      [NavSection.ALBUM]: '은혜의 순간들',
       [NavSection.LOCATION]: '오시는 길'
     };
     

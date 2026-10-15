@@ -10,6 +10,10 @@ import CommentDeleteModal from './CommentDeleteModal';
 import ImageViewerModal from './ImageViewerModal';
 import { useModalBackButton } from '../hooks/useModalBackButton';
 import { linkifyText, linkifyHTML } from '../utils/textUtils';
+// [한글 코멘트] 게시글/주보 공유하기 버튼, 딥링크 URL 생성 및 동적 SEO 메타태그 유틸리티 임포트
+import ShareButton from './ShareButton';
+import { buildShareUrl, setDeepLinkParams, extractPlainText } from '../utils/deepLink';
+import { updateMetaTags } from '../utils/seo';
 
 interface PostDetailModalProps {
   isOpen: boolean;
@@ -120,6 +124,29 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
       const data = await getPostDetail(postId);
       setPost(data);
       console.log('[PostDetailModal] ✅ 게시글 로드 완료 - postId:', postId, 'title:', data.title);
+
+      // [한글 코멘트] 게시글 상세 진입 시 주소창 딥링크(?board=코드&post=번호) 동기화 및 동적 SEO 메타태그 업데이트
+      setDeepLinkParams({
+        section: 'board',
+        board: data.category_code || undefined,
+        post: data.post_id
+      });
+      const shareUrl = buildShareUrl({
+        section: 'board',
+        board: data.category_code || undefined,
+        post: data.post_id
+      });
+      const plainSummary = extractPlainText(data.content, 120) || `${data.category_name} 게시글`;
+      let firstImage: string | undefined;
+      if (data.image_url) {
+        try {
+          const parsed = JSON.parse(data.image_url);
+          if (Array.isArray(parsed) && parsed.length > 0) firstImage = parsed[0];
+        } catch {
+          firstImage = data.image_url;
+        }
+      }
+      updateMetaTags(`[${data.category_name}] ${data.title}`, plainSummary, firstImage, shareUrl);
       
       // 게시글을 읽은 후 부모 컴포넌트에 알림 (게시글 목록 갱신을 위해)
       if (onUpdate) {
@@ -299,8 +326,19 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
                     {post.category_name}
                   </span>
                 </div>
-                {/* 수정/삭제 버튼 */}
+                {/* [한글 코멘트] 공유하기 및 수정/삭제 버튼 영역 */}
                 <div className="flex items-center gap-2">
+                  <ShareButton
+                    title={post.title}
+                    description={extractPlainText(post.content, 100)}
+                    shareUrl={buildShareUrl({
+                      section: 'board',
+                      board: post.category_code || undefined,
+                      post: post.post_id
+                    })}
+                    categoryLabel={post.category_name || '게시판'}
+                    variant="compact"
+                  />
                   {(() => {
                     const isAdmin = user && hasRole(user, 'admin', 'super-admin');
                     const isAuthor = user && user.name === post.author_name;

@@ -22,18 +22,33 @@ require('dotenv').config({ path: './config.env' });
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 미들웨어 설정 (seomgim.foryou.me 도메인 포함 CORS 안전 허용)
-const allowedOrigins = (process.env.CORS_ORIGIN || '*')
+// [한글 코멘트] 보안 보완: CORS 허용 도메인 검증 로직 정상화 (seomgim.foryou.me, 서브도메인 및 로컬 개발 환경 허용)
+const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
-  .map(o => o.trim());
+  .map(o => o.trim())
+  .filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(null, true);
+      return callback(null, true);
     }
+    try {
+      const parsed = new URL(origin);
+      const isAllowedHost =
+        parsed.hostname === 'localhost' ||
+        parsed.hostname === '127.0.0.1' ||
+        parsed.hostname.startsWith('192.168.') ||
+        parsed.hostname.endsWith('.foryou.me') ||
+        parsed.hostname === 'foryou.me';
+      if (isAllowedHost) {
+        return callback(null, true);
+      }
+    } catch (e) {
+      // 잘못된 Origin 형식 무시
+    }
+    console.warn(`[CORS] 차단된 Origin 요청: ${origin}`);
+    return callback(null, false);
   },
   credentials: true
 }));

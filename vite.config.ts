@@ -76,10 +76,7 @@ export default defineConfig(({ mode }) => {
           }
         }
       ],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
+      // [한글 코멘트] 보안 강화: 클라이언트 번들에 GEMINI_API_KEY가 평문 노출되지 않도록 define 주입 제거
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

@@ -9,6 +9,10 @@ import { getUserInfo, hasRole, syncSession, User as UserType } from '../services
 import AlertModal from './AlertModal';
 import TagManagementModal from './TagManagementModal';
 import ImageViewerModal from './ImageViewerModal';
+// [한글 코멘트] 게시판/게시글 딥링크(?board=, ?post=), 공유하기 버튼 및 SEO 메타태그 초기화 유틸리티 임포트
+import ShareButton from './ShareButton';
+import { getDeepLinkParams, setDeepLinkParams, clearDeepLinkParams, buildShareUrl } from '../utils/deepLink';
+import { resetMetaTags } from '../utils/seo';
 
 const BoardSection: React.FC = () => {
   const [categories, setCategories] = useState<BoardCategory[]>([]);
@@ -179,14 +183,51 @@ const BoardSection: React.FC = () => {
     };
   }, [showTagManagementModal]);
 
-  // 카테고리 로드
+  // 카테고리 로드 및 딥링크(?board=, ?post=) 연동
   useEffect(() => {
     const loadCategories = async () => {
       try {
         const data = await getCategories();
         setCategories(data);
-        if (data.length > 0 && !selectedCategory) {
+
+        // [한글 코멘트] URL에 ?board=코드 가 지정되어 있는 경우 해당 게시판 탭 자동 선택
+        const { boardCode, postId } = getDeepLinkParams();
+        if (boardCode && data.length > 0) {
+          if (boardCode === 'survey') {
+            const memberCat = data.find(c => c.category_code === 'member');
+            if (memberCat) {
+              setSelectedCategory(memberCat.category_id);
+              setMemberBoardSubTab('survey');
+            }
+          } else if (boardCode === 'organization') {
+            const orgCat = data.find(c => c.category_code === 'organization');
+            const memberCat = data.find(c => c.category_code === 'member');
+            if (orgCat) {
+              setSelectedCategory(orgCat.category_id);
+              setMemberBoardSubTab('organization');
+            } else if (memberCat) {
+              setSelectedCategory(memberCat.category_id);
+              setMemberBoardSubTab('organization');
+            }
+          } else {
+            const matchedCat = data.find(c => c.category_code === boardCode);
+            if (matchedCat) {
+              setSelectedCategory(matchedCat.category_id);
+              if (boardCode === 'member') {
+                setMemberBoardSubTab('member');
+              }
+            } else if (!selectedCategory) {
+              setSelectedCategory(data[0].category_id);
+            }
+          }
+        } else if (data.length > 0 && !selectedCategory) {
           setSelectedCategory(data[0].category_id);
+        }
+
+        // [한글 코멘트] URL에 ?post=번호 가 지정되어 있는 경우 해당 게시글 상세 모달 즉시 오픈
+        if (postId) {
+          setSelectedPostId(postId);
+          setShowDetailModal(true);
         }
       } catch (error) {
         console.error('카테고리 로드 오류:', error);
@@ -195,6 +236,20 @@ const BoardSection: React.FC = () => {
 
     // 초기 로드
     loadCategories();
+
+    // [한글 코멘트] 브라우저 뒤로/앞으로가기 시 ?post= 딥링크 동기화
+    const handlePopState = () => {
+      const { postId } = getDeepLinkParams();
+      if (postId) {
+        setSelectedPostId(postId);
+        setShowDetailModal(true);
+      } else {
+        setShowDetailModal(false);
+        setSelectedPostId(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, [user]); // user가 변경되면 다시 로드 (로그인/로그아웃 시)
 
   // 게시글 로드 (categories는 의존성에서 제거하여 카테고리 갱신 시 글 목록이 다시 로드되지 않도록 함)
@@ -677,8 +732,21 @@ const BoardSection: React.FC = () => {
                     </span>
                   </div>
 
-                  {/* 우측: 글쓰기 버튼 */}
-                  <div className="shrink-0">
+                  {/* 우측: 게시판 링크 공유 버튼 & 글쓰기 버튼 */}
+                  <div className="shrink-0 flex items-center gap-2">
+                    {(() => {
+                      const currentCategory = categories.find(c => c.category_id === selectedCategory);
+                      if (!currentCategory) return null;
+                      return (
+                        <ShareButton
+                          title={`${currentCategory.category_name} - 창원섬김의교회`}
+                          description={currentCategory.description || `${currentCategory.category_name} 바로가기`}
+                          shareUrl={buildShareUrl({ section: 'board', board: currentCategory.category_code })}
+                          categoryLabel="게시판 바로가기"
+                          variant="light"
+                        />
+                      );
+                    })()}
                     {(() => {
                       const currentCategory = categories.find(c => c.category_id === selectedCategory);
                       const isOrgBoard = (currentCategory?.category_code === 'organization') ||
@@ -1014,6 +1082,9 @@ const BoardSection: React.FC = () => {
             onClose={() => {
               setShowDetailModal(false);
               setSelectedPostId(null);
+              // [한글 코멘트] 게시글 상세 모달 닫기 시 ?post 파라미터 제거 및 기본 메타태그 복원
+              clearDeepLinkParams(['post']);
+              resetMetaTags();
             }}
             postId={selectedPostId}
             onUpdate={handlePostUpdate}

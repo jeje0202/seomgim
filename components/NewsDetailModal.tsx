@@ -6,6 +6,10 @@ import { getNewsDetail, NewsItem, getTagColor, formatNewsDate } from '../service
 import ImageViewerModal from './ImageViewerModal';
 import { useModalBackButton } from '../hooks/useModalBackButton';
 import { linkifyText } from '../utils/textUtils';
+// [한글 코멘트] 교회소식 공유하기 버튼, 딥링크 URL 생성 및 동적 SEO 메타태그 유틸리티 임포트
+import ShareButton from './ShareButton';
+import { buildShareUrl, setDeepLinkParams, extractPlainText } from '../utils/deepLink';
+import { updateMetaTags } from '../utils/seo';
 
 interface NewsDetailModalProps {
   isOpen: boolean;
@@ -50,6 +54,21 @@ const NewsDetailModal: React.FC<NewsDetailModalProps> = ({
     try {
       const data = await getNewsDetail(newsId);
       setNews(data);
+
+      // [한글 코멘트] 교회소식 상세 진입 시 주소창 딥링크(?news=번호) 동기화 및 동적 SEO 메타태그 업데이트
+      setDeepLinkParams({ section: 'news', news: data.news_id });
+      const shareUrl = buildShareUrl({ section: 'news', news: data.news_id });
+      const plainSummary = data.summary || extractPlainText(data.content, 120);
+      let firstImage: string | undefined;
+      if (data.image_url) {
+        try {
+          const parsed = JSON.parse(data.image_url);
+          if (Array.isArray(parsed) && parsed.length > 0) firstImage = parsed[0];
+        } catch {
+          firstImage = data.image_url;
+        }
+      }
+      updateMetaTags(`[교회소식] ${data.title}`, plainSummary, firstImage, shareUrl);
     } catch (err: any) {
       setError(err.message || '교회소식을 불러올 수 없습니다.');
     } finally {
@@ -132,15 +151,25 @@ const NewsDetailModal: React.FC<NewsDetailModalProps> = ({
           <>
             {/* 교회소식 헤더 */}
             <div className="mb-6 pb-6 border-b border-slate-200">
-              <div className="flex items-center gap-3 mb-4">
-                <span className={`px-3 py-1 rounded-full text-xs font-bold ${getTagColor(news.tag)}`}>
-                  {news.tag}
-                </span>
-                {news.is_pinned && (
-                  <span className="px-2 py-1 bg-rose-500 text-white text-xs font-bold rounded">
-                    고정
+              <div className="flex items-center justify-between gap-3 mb-4 pr-12">
+                <div className="flex items-center gap-2">
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${getTagColor(news.tag)}`}>
+                    {news.tag}
                   </span>
-                )}
+                  {news.is_pinned && (
+                    <span className="px-2 py-1 bg-rose-500 text-white text-xs font-bold rounded">
+                      고정
+                    </span>
+                  )}
+                </div>
+                {/* [한글 코멘트] 교회소식 공유하기 버튼 추가 */}
+                <ShareButton
+                  title={news.title}
+                  description={news.summary || extractPlainText(news.content, 100)}
+                  shareUrl={buildShareUrl({ section: 'news', news: news.news_id })}
+                  categoryLabel={`교회소식 · ${news.tag}`}
+                  variant="compact"
+                />
               </div>
 
               <h2 className="text-3xl font-bold text-slate-800 mb-4">{news.title}</h2>

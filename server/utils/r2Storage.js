@@ -8,13 +8,18 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../config.env') });
 
-const accountId = process.env.R2_ACCOUNT_ID || 'fd854655f29ef69879842c3463c56351';
-const accessKeyId = process.env.R2_ACCESS_KEY_ID || '61cc07b252f86956a177521903a10ddc';
-const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '656833bba1679af72f68a2449e917923246daf6e90a6d914e5d4ae6e905ffcaa';
+// [한글 코멘트] 보안 강화: Cloudflare R2 인증키 소스코드 평문 하드코딩을 제거하고 환경변수(config.env)에서만 로드하도록 수정
+const accountId = process.env.R2_ACCOUNT_ID || '';
+const accessKeyId = process.env.R2_ACCESS_KEY_ID || '';
+const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '';
 const bucketName = process.env.R2_BUCKET_NAME || 'media';
-const endpointUrl = process.env.R2_ENDPOINT_URL || `https://${accountId}.r2.cloudflarestorage.com`;
+const endpointUrl = process.env.R2_ENDPOINT_URL || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : '');
 const publicUrl = process.env.R2_PUBLIC_URL || 'https://media.foryou.me';
 const r2Prefix = process.env.R2_PREFIX || 'seomgim/data';
+
+if (!accountId || !accessKeyId || !secretAccessKey) {
+  console.warn('⚠️ [R2 Storage] config.env에 R2 인증 환경변수가 설정되지 않았습니다.');
+}
 
 // [한글 코멘트] S3 호환 Cloudflare R2 클라이언트 객체 생성
 const s3Client = new S3Client({
