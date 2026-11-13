@@ -1,5 +1,8 @@
 // 사진첩 앨범 API 서비스
+// [한글 코멘트] 고속 앨범 뷰어 오픈을 위한 인메모리 캐시, 호버/터치 프리페칭(prefetch), 이미지 사전 디코딩 연동 추가
 import { getToken } from './authApi';
+import { resolveMediaUrl } from '../utils/mediaUrl';
+import { preloadImage } from '../utils/imagePreloader';
 
 const API_BASE_URL = '/api/albums';
 
@@ -8,12 +11,12 @@ export interface Album {
   album_id: number;
   title: string;
   description?: string;
-  author_id?: number; // 작성자 ID 추가
+  author_id?: number;
   author_name: string;
   view_count: number;
   created_at: string;
   thumbnail?: string;
-  photo_count?: number; // 이미지 개수
+  photo_count?: number;
 }
 
 // 앨범 상세 타입
@@ -41,7 +44,38 @@ interface ApiResponse<T> {
   errors?: any[];
 }
 
-// [한글 코멘트] 사용자 요청: 앨범 목록 실시간 검색 파라미터(search) 지원 추가
+// [한글 코멘트] 앨범 상세 데이터 메모리 캐시 (유효시간 5분) 및 진행 중인 요청 공유 맵
+const ALBUM_CACHE_TTL_MS = 5 * 60 * 1000;
+const albumDetailCache = new Map<number, { data: AlbumDetail; cachedAt: number }>();
+const inFlightDetailMap = new Map<number, Promise<AlbumDetail>>();
+
+/**
+ * [한글 코멘트] 동기적으로 캐시된 앨범 상세 데이터가 있는지 확인하여 반환하는 함수 (0ms 즉시 모달 오픈용)
+ */
+export const getCachedAlbumDetail = (albumId: number): AlbumDetail | null => {
+  const hit = albumDetailCache.get(albumId);
+  if (!hit) return null;
+  if (Date.now() - hit.cachedAt > ALBUM_CACHE_TTL_MS) {
+    albumDetailCache.delete(albumId);
+    return null;
+  }
+  return hit.data;
+};
+
+/**
+ * [한글 코멘트] 앨범 생성·수정·삭제 시 상세 캐시를 무효화하는 함수
+ */
+export const invalidateAlbumCache = (albumId?: number): void => {
+  if (typeof albumId === 'number') {
+    albumDetailCache.delete(albumId);
+    inFlightDetailMap.delete(albumId);
+  } else {
+    albumDetailCache.clear();
+    inFlightDetailMap.clear();
+  }
+};
+
+// [한글 코멘트] 앨범 목록 조회 (썸네일 URL을 R2 CDN URL로 정규화)
 export const getAlbums = async (params?: {
   page?: number;
   limit?: number;
@@ -64,7 +98,6 @@ export const getAlbums = async (params?: {
     }
 
     const url = `${API_BASE_URL}?${queryParams.toString()}`;
-    console.log('앨범 API 호출:', { url, API_BASE_URL, params, fullUrl: window.location.origin + url });
 
     const response = await fetch(url, {
       method: 'GET',
@@ -73,29 +106,12 @@ export const getAlbums = async (params?: {
       },
     });
 
-    console.log('앨범 API 응답:', { 
-      status: response.status, 
-      statusText: response.statusText,
-      ok: response.ok,
-      url: response.url,
-      contentType: response.headers.get('content-type')
-    });
-
-    // Content-Type 확인 - HTML이 반환되면 프록시 문제
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
-      const text = await response.text().catch(() => '');
-      console.error('앨범 API 오류: JSON이 아닌 응답 수신', { 
-        status: response.status, 
-        contentType,
-        responsePreview: text.substring(0, 200)
-      });
-      throw new Error(`프록시 오류: API 서버에 연결할 수 없습니다. 백엔드 서버(포트 5000)가 실행 중인지 확인하세요.`);
+      throw new Error('프록시 오류: API 서버에 연결할 수 없습니다. 백엔드 서버(포트 5000)가 실행 중인지 확인하세요.');
     }
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      console.error('앨범 API 오류 응답:', { status: response.status, errorText });
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
@@ -110,7 +126,14 @@ export const getAlbums = async (params?: {
     }> = await response.json();
 
     if (result.success && result.data) {
-      return result.data;
+      const normalizedAlbums = result.data.albums.map((a) => ({
+        ...a,
+        thumbnail: a.thumbnail ? resolveMediaUrl(a.thumbnail) : a.thumbnail
+      }));
+      return {
+        albums: normalizedAlbums,
+        pagination: result.data.pagination
+      };
     }
     throw new Error(result.message || '앨범 목록 조회 실패');
   } catch (error) {
@@ -119,47 +142,96 @@ export const getAlbums = async (params?: {
   }
 };
 
-// 앨범 상세 조회
-export const getAlbumDetail = async (albumId: number): Promise<AlbumDetail> => {
-  try {
-    // 로그인한 사용자의 경우 토큰을 포함하여 요청 (조회수 증가를 위해 user_id 필요)
-    const token = getToken();
-    const headers: HeadersInit = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+// [한글 코멘트] 앨범 상세 조회 (캐시 히트 시 즉시 반환 및 사진 URL R2 CDN 정규화)
+export const getAlbumDetail = async (albumId: number, forceRefresh: boolean = false): Promise<AlbumDetail> => {
+  if (!forceRefresh) {
+    const cached = getCachedAlbumDetail(albumId);
+    if (cached) {
+      return cached;
     }
-
-    const response = await fetch(`${API_BASE_URL}/${albumId}`, {
-      headers
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    const existingPromise = inFlightDetailMap.get(albumId);
+    if (existingPromise) {
+      return existingPromise;
     }
-
-    const result: ApiResponse<{
-      album: AlbumDetail;
-      photos: AlbumPhoto[];
-    }> = await response.json();
-
-    if (result.success && result.data) {
-      return {
-        ...result.data.album,
-        photos: result.data.photos
-      };
-    }
-    throw new Error(result.message || '앨범 상세 조회 실패');
-  } catch (error) {
-    console.error('앨범 상세 조회 오류:', error);
-    throw error;
   }
+
+  const fetchPromise = (async (): Promise<AlbumDetail> => {
+    try {
+      const token = getToken();
+      const headers: HeadersInit = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/${albumId}`, {
+        headers
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result: ApiResponse<{
+        album: AlbumDetail;
+        photos: AlbumPhoto[];
+      }> = await response.json();
+
+      if (result.success && result.data) {
+        const normalizedPhotos = (result.data.photos || []).map((p) => ({
+          ...p,
+          photo_url: resolveMediaUrl(p.photo_url),
+          thumbnail_url: p.thumbnail_url ? resolveMediaUrl(p.thumbnail_url) : undefined
+        }));
+
+        const detail: AlbumDetail = {
+          ...result.data.album,
+          photos: normalizedPhotos
+        };
+
+        albumDetailCache.set(albumId, { data: detail, cachedAt: Date.now() });
+        return detail;
+      }
+      throw new Error(result.message || '앨범 상세 조회 실패');
+    } catch (error) {
+      console.error('앨범 상세 조회 오류:', error);
+      throw error;
+    } finally {
+      inFlightDetailMap.delete(albumId);
+    }
+  })();
+
+  inFlightDetailMap.set(albumId, fetchPromise);
+  return fetchPromise;
+};
+
+/**
+ * [한글 코멘트] 앨범 카드 마우스 호버/터치 시 상세 데이터와 상위 썸네일·첫 장 원본을 백그라운드에서 미리 준비하는 함수
+ */
+export const prefetchAlbumDetail = (albumId: number): void => {
+  if (getCachedAlbumDetail(albumId) || inFlightDetailMap.has(albumId)) {
+    return;
+  }
+
+  getAlbumDetail(albumId)
+    .then((detail) => {
+      // 상위 6장 썸네일 및 첫 번째 원본 이미지를 미리 디코딩 캐시에 적재
+      detail.photos.slice(0, 6).forEach((p) => {
+        if (p.thumbnail_url) preloadImage(p.thumbnail_url);
+      });
+      if (detail.photos[0]?.photo_url) {
+        preloadImage(detail.photos[0].photo_url);
+      }
+    })
+    .catch(() => {
+      // 백그라운드 프리페치 실패 시 조용히 무시
+    });
 };
 
 // 앨범 생성
 export const createAlbum = async (albumData: {
   title: string;
   description?: string;
-  photos: Array<{ url: string; description?: string }>;
+  photos: Array<{ url: string; thumbnailUrl?: string; description?: string }>;
 }): Promise<number> => {
   try {
     const token = getToken();
@@ -184,6 +256,7 @@ export const createAlbum = async (albumData: {
     const result: ApiResponse<{ album_id: number }> = await response.json();
 
     if (result.success && result.data) {
+      invalidateAlbumCache();
       return result.data.album_id;
     }
     throw new Error(result.message || '앨범 생성 실패');
@@ -224,6 +297,8 @@ export const updateAlbum = async (albumId: number, albumData: {
     if (!result.success) {
       throw new Error(result.message || '앨범 수정 실패');
     }
+
+    invalidateAlbumCache(albumId);
   } catch (error) {
     console.error('앨범 수정 오류:', error);
     throw error;
@@ -255,6 +330,8 @@ export const deleteAlbum = async (albumId: number): Promise<void> => {
     if (!result.success) {
       throw new Error(result.message || '앨범 삭제 실패');
     }
+
+    invalidateAlbumCache(albumId);
   } catch (error) {
     console.error('앨범 삭제 오류:', error);
     throw error;
@@ -273,9 +350,7 @@ export const uploadPhotos = async (files: File[]): Promise<Array<{ url: string; 
     let compressedResults;
     try {
       const { compressImagesWithThumbnails } = await import('../utils/imageCompression');
-      console.log('[사진 업로드] 이미지 압축 시작...', files.length, '개');
       compressedResults = await compressImagesWithThumbnails(files);
-      console.log('[사진 업로드] 이미지 압축 완료');
     } catch (compressionError: any) {
       console.error('[사진 업로드] 이미지 압축 오류:', compressionError);
       throw new Error(`이미지 압축 실패: ${compressionError.message || '알 수 없는 오류'}`);
@@ -286,11 +361,6 @@ export const uploadPhotos = async (files: File[]): Promise<Array<{ url: string; 
     compressedResults.forEach(result => {
       formData.append('fullImages', result.fullImage);
       formData.append('thumbnails', result.thumbnail);
-    });
-    
-    console.log('[사진 업로드] FormData 생성 완료:', {
-      fullImages: compressedResults.length,
-      thumbnails: compressedResults.length
     });
 
     const response = await fetch(`${API_BASE_URL}/upload`, {
@@ -319,4 +389,3 @@ export const uploadPhotos = async (files: File[]): Promise<Array<{ url: string; 
     throw error;
   }
 };
-

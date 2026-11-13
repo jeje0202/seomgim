@@ -6,10 +6,14 @@ import { getNewsDetail, NewsItem, getTagColor, formatNewsDate } from '../service
 import ImageViewerModal from './ImageViewerModal';
 import { useModalBackButton } from '../hooks/useModalBackButton';
 import { linkifyText } from '../utils/textUtils';
+// [한글 코멘트] 보안 강화: 교회소식 본문 XSS 차단용 HTML 살균(Sanitize) 유틸리티 임포트
+import { sanitizeAndLinkifyHtml } from '../utils/sanitizeHtml';
 // [한글 코멘트] 교회소식 공유하기 버튼, 딥링크 URL 생성 및 동적 SEO 메타태그 유틸리티 임포트
 import ShareButton from './ShareButton';
 import { buildShareUrl, setDeepLinkParams, extractPlainText } from '../utils/deepLink';
 import { updateMetaTags } from '../utils/seo';
+// [한글 코멘트] R2 공개 CDN URL 직결 변환 유틸리티 임포트
+import { resolveMediaUrl } from '../utils/mediaUrl';
 
 interface NewsDetailModalProps {
   isOpen: boolean;
@@ -210,10 +214,11 @@ const NewsDetailModal: React.FC<NewsDetailModalProps> = ({
                         {imageUrls.map((url: string, index: number) => (
                           <div key={index} className="relative cursor-pointer group" onClick={() => handleImageClick(index, imageUrls)}>
                             <img
-                              src={url.startsWith('http') ? url : url}
+                              src={resolveMediaUrl(url)}
                               alt={`공지사항 이미지 ${index + 1}`}
                               className="w-full rounded-lg shadow-md transition-transform group-hover:scale-[1.02]"
                               loading="lazy"
+                              decoding="async"
                               onError={(e) => {
                                 console.error('이미지 로드 실패:', url);
                                 (e.target as HTMLImageElement).style.display = 'none';
@@ -243,10 +248,11 @@ const NewsDetailModal: React.FC<NewsDetailModalProps> = ({
                 return (
                   <div className="mb-6 cursor-pointer group relative" onClick={() => handleImageClick(0, [singleImageUrl])}>
                     <img
-                      src={singleImageUrl.startsWith('http') ? singleImageUrl : singleImageUrl}
+                      src={resolveMediaUrl(singleImageUrl)}
                       alt="공지사항 이미지"
                       className="w-full rounded-lg shadow-md transition-transform group-hover:scale-[1.02]"
                       loading="lazy"
+                      decoding="async"
                       onError={(e) => {
                         console.error('이미지 로드 실패:', singleImageUrl);
                         (e.target as HTMLImageElement).style.display = 'none';
@@ -261,11 +267,11 @@ const NewsDetailModal: React.FC<NewsDetailModalProps> = ({
                   </div>
                 );
               })()}
-              {/* 콘텐츠를 HTML로 렌더링 */}
+              {/* [한글 코멘트] 보안 강화: 콘텐츠를 DOMPurify로 살균 처리한 안전한 HTML로 렌더링 */}
               <div
                 className="post-content max-w-none px-2 py-4 bg-white/50 rounded-lg border border-slate-100 prose prose-slate"
                 style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-                dangerouslySetInnerHTML={{ __html: news.content }}
+                dangerouslySetInnerHTML={{ __html: sanitizeAndLinkifyHtml(news.content) }}
               />
             </div>
           </>

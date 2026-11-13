@@ -4,6 +4,8 @@ const router = express.Router();
 const { getPool } = require('../db');
 const { body, validationResult, param, query } = require('express-validator');
 const { authenticate, authorize, optionalAuth } = require('../middleware/auth');
+// [한글 코멘트] 보안 강화: 하드코딩된 JWT 시크릿 폴백 제거 및 중앙 JWT 설정 모듈 참조
+const { JWT_SECRET } = require('../config/jwt');
 
 // ========== 활동 추적 API ==========
 
@@ -48,7 +50,7 @@ router.post('/track',
         userId = user.user_id;
         try {
           const jwt = require('jsonwebtoken');
-          const JWT_SECRET = process.env.JWT_SECRET || 'seomgim-church-secret-key-change-in-production';
+          // [한글 코멘트] 상단에서 불러온 중앙 관리 JWT_SECRET 사용
           const decoded = jwt.verify(token, JWT_SECRET);
           sessionId = decoded.session_id || null;
         } catch (e) {
@@ -90,7 +92,7 @@ router.post('/logout',
       if (token) {
         try {
           const jwt = require('jsonwebtoken');
-          const JWT_SECRET = process.env.JWT_SECRET || 'seomgim-church-secret-key-change-in-production';
+          // [한글 코멘트] 상단에서 불러온 중앙 관리 JWT_SECRET 사용
           const decoded = jwt.verify(token, JWT_SECRET);
           sessionId = decoded.session_id || null;
         } catch (e) {
@@ -100,11 +102,11 @@ router.post('/logout',
 
       if (sessionId) {
         const pool = getPool();
-        // 세션 종료 시간 및 이용시간 계산
+        // [한글 코멘트] PostgreSQL 문법: 세션 종료 시간 및 이용시간(초) 계산
         await pool.query(`
           UPDATE user_sessions 
           SET logout_time = NOW(),
-              session_duration = TIMESTAMPDIFF(SECOND, login_time, NOW())
+              session_duration = EXTRACT(EPOCH FROM (NOW() - login_time))::INTEGER
           WHERE session_id = ? AND user_id = ? AND logout_time IS NULL
         `, [sessionId, user.user_id]);
       }
@@ -381,8 +383,7 @@ router.get('/ip-statistics',
         activityParams.push(end_date);
       }
 
-      // IP별 활동 통계 (로그인/비로그인 사용자 모두 포함)
-      // user_activities에서 IP 주소를 직접 가져오거나, session을 통해 가져옴
+      // [한글 코멘트] PostgreSQL 문법: STRING_AGG 및 HAVING 절 원본 표현식 사용
       const [ipActivityStats] = await pool.query(`
         SELECT 
           COALESCE(a.ip_address, s.ip_address) as ip_address,
@@ -391,13 +392,13 @@ router.get('/ip-statistics',
           COUNT(DISTINCT a.activity_type) as activity_types,
           MIN(a.created_at) as first_access,
           MAX(a.created_at) as last_access,
-          GROUP_CONCAT(DISTINCT CASE WHEN u.name IS NOT NULL THEN u.name END ORDER BY u.name SEPARATOR ', ') as user_names
+          STRING_AGG(DISTINCT u.name, ', ' ORDER BY u.name) as user_names
         FROM user_activities a
         LEFT JOIN user_sessions s ON a.session_id = s.session_id
         LEFT JOIN users u ON a.user_id = u.user_id
         ${activityWhereClause}
         GROUP BY COALESCE(a.ip_address, s.ip_address)
-        HAVING ip_address IS NOT NULL
+        HAVING COALESCE(a.ip_address, s.ip_address) IS NOT NULL
         ORDER BY total_activities DESC
         LIMIT 100
       `, activityParams);
@@ -423,7 +424,7 @@ router.get('/ip-statistics',
           AVG(s.session_duration) as avg_duration,
           MIN(s.login_time) as first_access,
           MAX(s.login_time) as last_access,
-          GROUP_CONCAT(DISTINCT u.name ORDER BY u.name SEPARATOR ', ') as user_names
+          STRING_AGG(DISTINCT u.name, ', ' ORDER BY u.name) as user_names
         FROM user_sessions s
         JOIN users u ON s.user_id = u.user_id
         ${sessionWhereClause}

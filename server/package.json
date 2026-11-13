@@ -11,7 +11,7 @@
     "church",
     "board",
     "express",
-    "mariadb"
+    "postgresql"
   ],
   "author": "",
   "license": "ISC",
@@ -27,6 +27,7 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "mysql2": "^3.6.5",
+    "pg": "^8.23.1",
     "sharp": "^0.35.3",
     "sqlite3": "^6.0.1"
   },

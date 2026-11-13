@@ -2,16 +2,18 @@
 // [한글 코멘트] React 훅(useState, useEffect) 및 페이징 네비게이션 아이콘 모듈 불러오기
 import React, { useState, useEffect } from 'react';
 import { Camera, PlusCircle, Trash2, Edit2, Eye, Calendar, User, X, RotateCw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Search } from 'lucide-react';
-import { getAlbums, getAlbumDetail, deleteAlbum, createAlbum, updateAlbum, uploadPhotos, Album, AlbumDetail } from '../services/albumApi';
+// [한글 코멘트] 고속 앨범 뷰어 오픈을 위한 캐시 조회(getCachedAlbumDetail) 및 호버 프리페치(prefetchAlbumDetail) 추가 임포트
+import { getAlbums, getAlbumDetail, getCachedAlbumDetail, prefetchAlbumDetail, deleteAlbum, createAlbum, updateAlbum, uploadPhotos, Album, AlbumDetail } from '../services/albumApi';
 import { getUserInfo, hasRole, User as UserType } from '../services/authApi';
 import AlertModal from './AlertModal';
 import ImageViewerModal from './ImageViewerModal';
+import AlbumDetailModal from './album/AlbumDetailModal';
 import { createPortal } from 'react-dom';
 import { useModalBackButton } from '../hooks/useModalBackButton';
-// [한글 코멘트] 사진첩 딥링크(?album=), 공유하기 버튼 및 동적 SEO 메타태그 유틸리티 임포트
-import ShareButton from './ShareButton';
+// [한글 코멘트] 사진첩 딥링크(?album=) 및 동적 SEO 메타태그 유틸리티 임포트
 import { getDeepLinkParams, setDeepLinkParams, clearDeepLinkParams, buildShareUrl } from '../utils/deepLink';
 import { updateMetaTags, resetMetaTags } from '../utils/seo';
+import { resolveMediaUrl } from '../utils/mediaUrl';
 
 const AlbumSection: React.FC = () => {
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -47,7 +49,11 @@ const AlbumSection: React.FC = () => {
 
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [imageViewerImages, setImageViewerImages] = useState<string[]>([]);
+  // [한글 코멘트] 고속 이미지 뷰어 하단 미니 바 및 프리뷰용 경량 썸네일 URL 배열 상태
+  const [imageViewerThumbnails, setImageViewerThumbnails] = useState<(string | undefined)[]>([]);
   const [imageViewerIndex, setImageViewerIndex] = useState(0);
+  // [한글 코멘트] 앨범 클릭 즉시 모달을 선오픈하고 사진 목록 로드 중 스켈레톤을 표시하기 위한 상태
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // [한글 코멘트] 사용자 요청: 페이지네이션 클릭 시 앨범 목록 상단 자동 스크롤을 위한 Ref
   const sectionTopRef = React.useRef<HTMLDivElement>(null);
@@ -101,10 +107,27 @@ const AlbumSection: React.FC = () => {
     }
   };
 
-  const handleAlbumClick = async (albumId: number) => {
+  // [한글 코멘트] 고속 앨범 상세 오픈: 캐시 적중 시 0ms 즉시 오픈, 캐시 미적중 시에도 목록 요약 정보로 0ms 선오픈 후 사진 비동기 주입
+  const handleAlbumClick = async (albumId: number, previewAlbum?: Album) => {
     try {
-      const album = await getAlbumDetail(albumId);
+      const cached = getCachedAlbumDetail(albumId);
+      if (cached) {
+        setSelectedAlbum(cached);
+        setDetailLoading(false);
+        setShowDetailModal(true);
+      } else if (previewAlbum) {
+        setSelectedAlbum({
+          ...previewAlbum,
+          author_id: previewAlbum.author_id || 0,
+          photos: []
+        });
+        setDetailLoading(true);
+        setShowDetailModal(true);
+      }
+
+      const album = cached || (await getAlbumDetail(albumId));
       setSelectedAlbum(album);
+      setDetailLoading(false);
       setShowDetailModal(true);
 
       // [한글 코멘트] 사진첩 상세 진입 시 주소창 딥링크(?album=번호) 동기화 및 동적 SEO 메타태그 업데이트
@@ -119,15 +142,16 @@ const AlbumSection: React.FC = () => {
       );
     } catch (error) {
       console.error('앨범 상세 조회 오류:', error);
+      setDetailLoading(false);
     }
   };
 
-  /* 1. handleImageClick 수정: 상세 보기에서는 원본 화질(photo_url) 우선 사용 */
+  // [한글 코멘트] 상세 보기 클릭 시 원본 화질(photo_url) 배열과 경량 썸네일(thumbnail_url) 배열을 분리 전달하여 뷰어 즉시 오픈
   const handleImageClick = (index: number, photos: Array<{ photo_url: string; thumbnail_url?: string }>) => {
-    // 마이그레이션 완료 후 photo_url 경로가 정상화되었으므로 원본 화질 우선 사용
-    // (이전에는 반복 오류 해결을 위해 썸네일을 우선 사용했었음)
-    const imageUrls = photos.map(p => p.photo_url || p.thumbnail_url);
+    const imageUrls = photos.map(p => resolveMediaUrl(p.photo_url || p.thumbnail_url));
+    const thumbUrls = photos.map(p => resolveMediaUrl(p.thumbnail_url || p.photo_url));
     setImageViewerImages(imageUrls);
+    setImageViewerThumbnails(thumbUrls);
     setImageViewerIndex(index);
     setShowImageViewer(true);
   };
@@ -242,20 +266,23 @@ const AlbumSection: React.FC = () => {
         ) : (
           <>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {albums.map((album) => (
+              {albums.map((album, idx) => (
                 <div
                   key={album.album_id}
                   className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 hover:shadow-md hover:border-rose-100 transition-all duration-300 cursor-pointer group"
-                  onClick={() => handleAlbumClick(album.album_id)}
+                  onMouseEnter={() => prefetchAlbumDetail(album.album_id)}
+                  onTouchStart={() => prefetchAlbumDetail(album.album_id)}
+                  onClick={() => handleAlbumClick(album.album_id, album)}
                 >
                   {/* 썸네일 이미지 */}
                   <div className="relative aspect-video bg-slate-200 overflow-hidden">
                     {album.thumbnail ? (
                       <img
-                        src={album.thumbnail}
+                        src={resolveMediaUrl(album.thumbnail)}
                         alt={album.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        loading="lazy"
+                        loading={idx < 6 ? 'eager' : 'lazy'}
+                        decoding="async"
                         onError={(e) => {
                           (e.target as HTMLImageElement).src = '/church_rainbow.jpg';
                         }}
@@ -443,12 +470,14 @@ const AlbumSection: React.FC = () => {
           onClose={() => {
             setShowDetailModal(false);
             setSelectedAlbum(null);
+            setDetailLoading(false);
             // [한글 코멘트] 앨범 상세 모달 닫기 시 ?album 파라미터 제거 및 기본 메타태그 복원
             clearDeepLinkParams(['album']);
             resetMetaTags();
             loadAlbums(); // 조회수 반영을 위해 목록 갱신
           }}
           album={selectedAlbum}
+          isLoadingPhotos={detailLoading}
           onImageClick={handleImageClick}
         />
       )}
@@ -510,166 +539,19 @@ const AlbumSection: React.FC = () => {
         confirmText="확인"
       />
 
-      {/* [한글 코멘트] 사용자 요청: 이미지 뷰어에 앨범 제목 및 단위('장') 전달 */}
+      {/* [한글 코멘트] 고속 이미지 뷰어: 경량 썸네일 배열(thumbnails)을 함께 전달하여 하단 바 병목 제거 및 즉시 표시 */}
       {showImageViewer && (
         <ImageViewerModal
           isOpen={showImageViewer}
           onClose={() => setShowImageViewer(false)}
           images={imageViewerImages}
+          thumbnails={imageViewerThumbnails}
           initialIndex={imageViewerIndex}
           title={selectedAlbum ? selectedAlbum.title : '은혜의 순간들'}
           unit="장"
         />
       )}
     </div>
-  );
-};
-
-// [한글 코멘트] 앨범 상세 모달 컴포넌트 (PC/모바일 전체화면 풀스크린 뷰어 적용)
-interface AlbumDetailModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  album: AlbumDetail;
-  onImageClick: (index: number, photos: Array<{ photo_url: string; thumbnail_url?: string }>) => void;
-}
-
-const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
-  isOpen,
-  onClose,
-  album,
-  onImageClick
-}) => {
-  // [한글 코멘트] 모바일 뒤로 가기 버튼으로 모달 닫기 지원
-  useModalBackButton({ isOpen, onClose });
-
-  // [한글 코멘트] 모달 열릴 때 body 스크롤 방지 및 ESC 키로 닫기
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const originalOverflow = document.body.style.overflow || '';
-    document.body.style.overflow = 'hidden';
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = originalOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('ko-KR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      timeZone: 'Asia/Seoul' // 한국 시간대 적용
-    });
-  };
-
-  return createPortal(
-    <div
-      className="fixed inset-0 bg-white z-[9999] flex flex-col w-full h-full overflow-hidden"
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        width: '100vw',
-        height: '100vh'
-      }}
-    >
-      {/* 닫기 버튼 - 우측 상단 고정 */}
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 md:top-6 md:right-8 w-10 h-10 md:w-12 md:h-12 rounded-full bg-rose-500 hover:bg-rose-600 flex items-center justify-center transition-all z-20 shadow-lg text-white cursor-pointer hover:scale-105 active:scale-95"
-        aria-label="닫기"
-        title="닫기 (ESC)"
-      >
-        <X size={22} className="text-white" />
-      </button>
-
-      {/* 헤더 영역 - 고정 (전체 화면 너비 활용) */}
-      <div className="flex-shrink-0 px-4 sm:px-8 md:px-12 pt-6 md:pt-8 pb-4 border-b border-slate-200 relative bg-white pr-16 md:pr-24 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-2 sm:mb-3">
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-800 truncate">{album.title}</h2>
-          {/* [한글 코멘트] 사진첩 상세 모달 공유하기 버튼 배치 */}
-          <ShareButton
-            title={album.title}
-            description={album.description || `총 ${album.photos.length}장의 은혜로운 사진이 담긴 앨범입니다.`}
-            shareUrl={buildShareUrl({ section: 'album', album: album.album_id })}
-            categoryLabel="은혜의 순간들 사진첩"
-            variant="compact"
-          />
-        </div>
-        {album.description && (
-          <p className="text-xs sm:text-sm md:text-base text-slate-600 mb-3 whitespace-pre-wrap">{album.description}</p>
-        )}
-
-        <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs sm:text-sm text-slate-500">
-          <div className="flex items-center gap-1.5">
-            <User size={15} className="text-slate-400" />
-            <span>{album.author_name}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Calendar size={15} className="text-slate-400" />
-            <span>{formatDate(album.created_at)}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Eye size={15} className="text-slate-400" />
-            <span>조회 {album.view_count}</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-rose-500 font-medium bg-rose-50 px-2.5 py-0.5 rounded-full text-xs">
-            <Camera size={13} />
-            <span>총 {album.photos.length}장의 사진</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 스크롤 가능한 본문 영역 (사진 그리드 - 화면 가득 채움) */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-8 md:px-12 py-6 bg-slate-50">
-        <div className="max-w-7xl mx-auto">
-          {/* 사진 그리드 */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-5">
-            {album.photos.map((photo, index) => (
-              <div
-                key={photo.photo_id}
-                className="relative aspect-square bg-slate-200 rounded-xl overflow-hidden cursor-pointer group shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5"
-                onClick={() => onImageClick(index, album.photos)}
-              >
-                <img
-                  src={photo.thumbnail_url || photo.photo_url}
-                  alt={photo.description || `사진 ${index + 1}`}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  loading="lazy"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/church_rainbow.jpg';
-                  }}
-                />
-                <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[11px] px-2 py-0.5 rounded font-medium shadow">
-                  {index + 1}
-                </div>
-                {photo.description && (
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent text-white text-xs p-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {photo.description}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body
   );
 };
 

@@ -221,19 +221,27 @@ export const toggleReaction = async (postId: number, reactionType: ReactionType)
   }
 };
 
-// 이미지 업로드
+// [한글 코멘트] 이미지 업로드 (보안 보완: 백엔드 인증 미들웨어 연동을 위해 Authorization JWT 토큰 헤더 전송)
 export const uploadImage = async (file: File, categoryCode?: string): Promise<string> => {
   try {
+    const token = getToken();
+    if (!token) {
+      throw new Error('이미지 업로드를 위해 로그인이 필요합니다.');
+    }
+
     const formData = new FormData();
     formData.append('image', file);
     
     // 카테고리 코드가 있으면 쿼리 파라미터로 전달
     const UPLOAD_API_URL = categoryCode 
-      ? `/api/upload/image?category_code=${categoryCode}`
+      ? `/api/upload/image?category_code=${encodeURIComponent(categoryCode)}`
       : '/api/upload/image';
 
     const response = await fetch(UPLOAD_API_URL, {
       method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
       body: formData
     });
 

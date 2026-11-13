@@ -10,8 +10,16 @@ const fs = require('fs');
 
 // 파일 저장 유틸리티 import
 const { getAlbumStoragePath, getThumbnailStoragePath, getAlbumImageUrl, getThumbnailUrl } = require('../utils/fileStorage');
-const { getAlbumFilePathFromUrl, getThumbnailFilePathFromUrl } = require('../utils/filePathHelper');
-const { uploadToR2, deleteFromR2 } = require('../utils/r2Storage');
+const { uploadToR2, deleteFromR2, toR2PublicUrl, normalizeR2Key } = require('../utils/r2Storage');
+
+// [한글 코멘트] MIME 타입별 표준 이미지 확장자 매핑 (JPEG 압축본이 .png 확장자로 잘못 저장되는 현상 방지)
+const MIME_TO_EXT = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp'
+};
 
 // [한글 코멘트] 로컬 디스크 저장 대신 multer.memoryStorage()를 사용하여 메모리 버퍼로 파일 수신
 const storage = multer.memoryStorage();
@@ -107,51 +115,53 @@ router.post('/upload',
         });
       }
 
-      // [한글 코멘트] R2 클라우드 스토리지 직접 업로드 및 URL 생성 로직
+      // [한글 코멘트] R2 클라우드 스토리지 병렬 배치 업로드 및 공개 CDN URL 직접 반환 로직
       const albumStoragePath = getAlbumStoragePath();
       const thumbnailStoragePath = getThumbnailStoragePath();
 
-      const uploadedPhotos = [];
+      const uploadedPhotos = new Array(fullImages.length);
+      const BATCH_SIZE = 5; // R2 동시 업로드 배치 크기
 
-      for (let index = 0; index < fullImages.length; index++) {
-        const fullFile = fullImages[index];
-        const thumbnailFile = thumbnails[index] || null;
-
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const fullExt = path.extname(fullFile.originalname).toLowerCase() || '.jpg';
-        const fullFilename = `album-${uniqueSuffix}${fullExt}`;
-        const albumImageUrl = getAlbumImageUrl(fullFilename, albumStoragePath);
-
-        // [한글 코멘트] R2 업로드 (원본 이미지)
-        const fullR2Key = `uploads/${albumImageUrl.replace(/^\/uploads\//, '')}`;
-        await uploadToR2(fullFile.buffer, fullR2Key, fullFile.mimetype);
-
-        let thumbnailImageUrl = null;
-        let thumbFilename = null;
-
-        if (thumbnailFile) {
-          const thumbExt = path.extname(thumbnailFile.originalname).toLowerCase() || '.jpg';
-          thumbFilename = `thumb-${uniqueSuffix}${thumbExt}`;
-          thumbnailImageUrl = getThumbnailUrl(thumbFilename, thumbnailStoragePath);
-
-          // [한글 코멘트] R2 업로드 (썸네일 이미지)
-          const thumbR2Key = `uploads/${thumbnailImageUrl.replace(/^\/uploads\//, '')}`;
-          await uploadToR2(thumbnailFile.buffer, thumbR2Key, thumbnailFile.mimetype);
+      for (let batchStart = 0; batchStart < fullImages.length; batchStart += BATCH_SIZE) {
+        const batchIndices = [];
+        for (let i = batchStart; i < Math.min(batchStart + BATCH_SIZE, fullImages.length); i++) {
+          batchIndices.push(i);
         }
 
-        console.log(`[사진 업로드] R2 업로드 완료 - index: ${index}`);
-        console.log(`  앨범 이미지: ${fullFilename} -> ${albumImageUrl}`);
-        console.log(`  썸네일: ${thumbFilename || '없음'} -> ${thumbnailImageUrl || '없음'}`);
+        await Promise.all(batchIndices.map(async (index) => {
+          const fullFile = fullImages[index];
+          const thumbnailFile = thumbnails[index] || null;
 
-        uploadedPhotos.push({
-          url: albumImageUrl, // 1080p 이미지 URL
-          thumbnailUrl: thumbnailImageUrl, // 썸네일 URL
-          filename: fullFilename,
-          thumbnailFilename: thumbFilename
-        });
+          const uniqueSuffix = `${Date.now()}-${index}-${Math.round(Math.random() * 1E9)}`;
+          const fullExt = MIME_TO_EXT[(fullFile.mimetype || '').toLowerCase()] || path.extname(fullFile.originalname).toLowerCase() || '.jpg';
+          const fullFilename = `album-${uniqueSuffix}${fullExt}`;
+          const relativeAlbumUrl = getAlbumImageUrl(fullFilename, albumStoragePath);
+
+          // [한글 코멘트] R2 업로드 (원본 1080p 이미지) 및 공개 CDN URL 획득
+          const fullUploadPromise = uploadToR2(fullFile.buffer, relativeAlbumUrl, fullFile.mimetype);
+
+          let thumbFilename = null;
+          let thumbUploadPromise = Promise.resolve(null);
+
+          if (thumbnailFile) {
+            const thumbExt = MIME_TO_EXT[(thumbnailFile.mimetype || '').toLowerCase()] || path.extname(thumbnailFile.originalname).toLowerCase() || '.jpg';
+            thumbFilename = `thumb-${uniqueSuffix}${thumbExt}`;
+            const relativeThumbUrl = getThumbnailUrl(thumbFilename, thumbnailStoragePath);
+            thumbUploadPromise = uploadToR2(thumbnailFile.buffer, relativeThumbUrl, thumbnailFile.mimetype);
+          }
+
+          const [fullUploadResult, thumbUploadResult] = await Promise.all([fullUploadPromise, thumbUploadPromise]);
+
+          uploadedPhotos[index] = {
+            url: fullUploadResult.url, // Cloudflare R2 공개 CDN URL 직접 반환
+            thumbnailUrl: thumbUploadResult ? thumbUploadResult.url : null, // 썸네일 공개 CDN URL 직접 반환
+            filename: fullFilename,
+            thumbnailFilename: thumbFilename
+          };
+        }));
       }
 
-      console.log(`[사진 업로드] ${uploadedPhotos.length}개 이미지 Cloudflare R2 직접 업로드 완료`);
+      console.log(`[사진 업로드] ${uploadedPhotos.length}개 이미지 Cloudflare R2 공개 CDN 업로드 완료`);
 
       res.json({
         success: true,
@@ -212,9 +222,9 @@ router.put('/:id',
         return res.status(403).json({ success: false, message: '앨범을 수정할 권한이 없습니다.' });
       }
 
-      // 기존 사진 목록 조회
+      // [한글 코멘트] 버그 수정: 기존 사진 목록 조회 시 thumbnail_url도 함께 조회하여 삭제 대상 썸네일이 R2에 남지 않도록 보완
       const [existingPhotos] = await pool.query(
-        'SELECT photo_id, photo_url FROM album_photos WHERE album_id = ?',
+        'SELECT photo_id, photo_url, thumbnail_url FROM album_photos WHERE album_id = ?',
         [id]
       );
 
@@ -227,12 +237,12 @@ router.put('/:id',
       // 기존 사진 삭제 (DB만)
       await pool.query('DELETE FROM album_photos WHERE album_id = ?', [id]);
 
-      // 새로운 사진 저장 (순서 포함, 썸네일 URL 포함)
+      // 새로운 사진 저장 (순서 포함, R2 공개 CDN URL 정규화 보장)
       if (photos && photos.length > 0) {
         const photoValues = photos.map((photo, index) => [
           id,
-          photo.url, // 1080p 이미지 URL
-          photo.thumbnailUrl || null, // 썸네일 URL
+          photo.url ? toR2PublicUrl(photo.url) : photo.url,
+          photo.thumbnailUrl ? toR2PublicUrl(photo.thumbnailUrl) : null,
           index,
           photo.description || null
         ]);
@@ -243,12 +253,16 @@ router.put('/:id',
         );
       }
 
-      // 삭제된 사진 파일 정리 (새 목록에 없는 파일 - 원본과 썸네일 모두)
-      const newPhotoUrls = photos.map(p => p.url);
-      const deletedPhotos = existingPhotos.filter(ep => !newPhotoUrls.includes(ep.photo_url));
+      // [한글 코멘트] 삭제된 사진 파일 정리 (정규화된 R2 Key 기준으로 비교하여 URL 형식 차이로 인한 오삭제 방지)
+      const keptR2Keys = new Set(
+        (photos || []).map(p => normalizeR2Key(p.url)).filter(Boolean)
+      );
+      const deletedPhotos = existingPhotos.filter(ep => {
+        const epKey = normalizeR2Key(ep.photo_url);
+        return epKey && !keptR2Keys.has(epKey);
+      });
 
       deletedPhotos.forEach(photo => {
-        // [한글 코멘트] 로컬 디스크 삭제 대신 R2 클라우드 스토리지 객체 전용 삭제 수행
         if (photo.photo_url) {
           deleteFromR2(photo.photo_url).catch(err => console.error('❌ R2 원본 삭제 오류:', err));
         }
@@ -367,31 +381,39 @@ router.get('/',
       const params = [];
       if (search && typeof search === 'string' && search.trim() !== '') {
         const keyword = `%${search.trim()}%`;
-        sql += ' AND (a.title LIKE ? OR a.description LIKE ?)';
+        // [한글 코멘트] PostgreSQL 대소문자 무시 검색(ILIKE) 적용
+        sql += ' AND (a.title ILIKE ? OR a.description ILIKE ?)';
         params.push(keyword, keyword);
       }
 
       sql += ' ORDER BY a.created_at DESC LIMIT ? OFFSET ?';
       params.push(parseInt(limit), parseInt(offset));
 
-      const [albums] = await pool.query(sql, params);
-
       // 전체 앨범 수 조회 (검색어 조건 포함)
       let countSql = 'SELECT COUNT(*) as total FROM albums a WHERE a.is_deleted = FALSE';
       const countParams = [];
       if (search && typeof search === 'string' && search.trim() !== '') {
         const keyword = `%${search.trim()}%`;
-        countSql += ' AND (a.title LIKE ? OR a.description LIKE ?)';
+        countSql += ' AND (a.title ILIKE ? OR a.description ILIKE ?)';
         countParams.push(keyword, keyword);
       }
 
-      const [countResult] = await pool.query(countSql, countParams);
+      // [한글 코멘트] 속도 개선: 앨범 목록 쿼리와 전체 개수 쿼리를 병렬 실행하고 썸네일 URL을 R2 CDN 직결 URL로 정규화
+      const [[albums], [countResult]] = await Promise.all([
+        pool.query(sql, params),
+        pool.query(countSql, countParams)
+      ]);
       const total = countResult[0].total;
+
+      const normalizedAlbums = albums.map((album) => ({
+        ...album,
+        thumbnail: album.thumbnail ? toR2PublicUrl(album.thumbnail) : album.thumbnail
+      }));
 
       res.json({
         success: true,
         data: {
-          albums,
+          albums: normalizedAlbums,
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -437,103 +459,71 @@ router.get('/:id',
         clientIp = clientIp.substring(7);
       }
 
-      // 디버깅 로그
-      console.log(`[앨범 조회] album_id: ${id}, user_id: ${userId || 'NULL'}, ip: ${clientIp}`);
-
-      // 조회 기록 확인 (중복 조회 방지)
-      // 같은 IP에서 다른 사용자가 로그인했을 때도 조회수가 증가하도록 user_id를 기준으로만 체크
-      let existingViews;
-      if (userId) {
-        // 로그인 사용자: user_id만으로 중복 체크 (같은 사용자가 같은 앨범을 여러 번 조회하는 것만 방지)
-        // 같은 IP에서 다른 사용자가 로그인했을 때는 조회수가 증가해야 함
-        // user_id가 다르면 다른 사용자로 간주하여 조회수 증가
-        [existingViews] = await pool.query(
-          'SELECT view_id FROM album_views WHERE album_id = ? AND user_id = ?',
-          [id, userId]
-        );
-        console.log(`[앨범 조회] 로그인 사용자 중복 체크 - album_id: ${id}, user_id: ${userId}, 기존 조회 기록: ${existingViews.length}개`);
-        if (existingViews.length > 0) {
-          console.log(`[앨범 조회] 기존 조회 기록 상세:`, existingViews);
-        }
-      } else {
-        // 비로그인 사용자: ip_address만으로 중복 체크
-        [existingViews] = await pool.query(
-          'SELECT view_id FROM album_views WHERE album_id = ? AND user_id IS NULL AND ip_address = ?',
-          [id, clientIp]
-        );
-        console.log(`[앨범 조회] 비로그인 사용자 중복 체크 - album_id: ${id}, ip: ${clientIp}, 기존 조회 기록: ${existingViews.length}개`);
-        if (existingViews.length > 0) {
-          console.log(`[앨범 조회] 기존 조회 기록 상세:`, existingViews);
-        }
-      }
-
-      // 중복 조회가 아닌 경우에만 조회수 증가 및 기록 저장
-      if (existingViews.length === 0) {
-        try {
-          // 트랜잭션 시작하여 조회수 증가와 조회 기록 저장을 원자적으로 처리
-          const connection = await pool.getConnection();
-          await connection.beginTransaction();
-
-          try {
-            // 조회수 증가
-            const [updateResult] = await connection.query(
-              'UPDATE albums SET view_count = view_count + 1 WHERE album_id = ? AND is_deleted = FALSE',
-              [id]
-            );
-            console.log(`[앨범 조회] 조회수 증가 쿼리 실행 - album_id: ${id}, 영향받은 행: ${updateResult.affectedRows}`);
-
-            // 조회 기록 저장
-            await connection.query(
-              'INSERT INTO album_views (album_id, user_id, ip_address) VALUES (?, ?, ?)',
-              [id, userId, clientIp]
-            );
-            console.log(`[앨범 조회] 조회 기록 저장 완료 - album_id: ${id}, user_id: ${userId || 'NULL'}, ip: ${clientIp}`);
-
-            await connection.commit();
-            console.log(`[앨범 조회] ✅ 조회수 증가 및 기록 저장 성공 - album_id: ${id}, user_id: ${userId || 'NULL'}, ip: ${clientIp}`);
-          } catch (insertError) {
-            await connection.rollback();
-            // UNIQUE KEY 제약 조건 위반 시 (동시 요청 등으로 인한 중복) 조용히 무시
-            if (insertError.code === 'ER_DUP_ENTRY') {
-              console.log(`[앨범 조회] 중복 조회 기록 무시 (동시 요청) - album_id: ${id}, user_id: ${userId || 'NULL'}, ip: ${clientIp}, 오류: ${insertError.message}`);
-            } else {
-              console.error('[앨범 조회] 조회 기록 저장 오류:', insertError);
-              console.error('[앨범 조회] 오류 상세:', JSON.stringify(insertError, null, 2));
-              throw insertError;
-            }
-          } finally {
-            connection.release();
-          }
-        } catch (error) {
-          console.error('[앨범 조회] 조회수 증가 오류:', error);
-          console.error('[앨범 조회] 오류 상세:', JSON.stringify(error, null, 2));
-          // 조회수 증가 실패해도 앨범은 조회 가능하도록 계속 진행
-        }
-      } else {
-        console.log(`[앨범 조회] 중복 조회로 인한 조회수 증가 건너뜀 - album_id: ${id}, user_id: ${userId || 'NULL'}, ip: ${clientIp}, 기존 조회 기록 ID: ${existingViews[0]?.view_id}`);
-      }
-
-      // 앨범 조회
-      const [albums] = await pool.query(
-        'SELECT * FROM albums WHERE album_id = ? AND is_deleted = FALSE',
-        [id]
-      );
+      // [한글 코멘트] 속도 개선: 조회수 증가 트랜잭션 완료를 기다리지 않고 앨범 정보와 사진 목록을 병렬 조회하여 즉시 응답 반환
+      const [[albums], [photos]] = await Promise.all([
+        pool.query('SELECT * FROM albums WHERE album_id = ? AND is_deleted = FALSE', [id]),
+        pool.query('SELECT * FROM album_photos WHERE album_id = ? ORDER BY photo_order ASC, photo_id ASC', [id])
+      ]);
 
       if (albums.length === 0) {
         return res.status(404).json({ success: false, message: '앨범을 찾을 수 없습니다.' });
       }
 
-      // 앨범의 사진 목록 조회
-      const [photos] = await pool.query(
-        'SELECT * FROM album_photos WHERE album_id = ? ORDER BY photo_order ASC',
-        [id]
-      );
+      // [한글 코멘트] 사진 및 썸네일 URL을 모두 R2 CDN 직결 URL로 정규화하여 백엔드 중계 병목 제거
+      const normalizedPhotos = photos.map((photo) => ({
+        ...photo,
+        photo_url: photo.photo_url ? toR2PublicUrl(photo.photo_url) : photo.photo_url,
+        thumbnail_url: photo.thumbnail_url ? toR2PublicUrl(photo.thumbnail_url) : photo.thumbnail_url
+      }));
 
       res.json({
         success: true,
         data: {
           album: albums[0],
-          photos
+          photos: normalizedPhotos
+        }
+      });
+
+      // [한글 코멘트] 비동기 조회수 중복 체크 및 증가 처리 (응답 지연 0ms)
+      setImmediate(async () => {
+        try {
+          let existingViews;
+          if (userId) {
+            [existingViews] = await pool.query(
+              'SELECT view_id FROM album_views WHERE album_id = ? AND user_id = ?',
+              [id, userId]
+            );
+          } else {
+            [existingViews] = await pool.query(
+              'SELECT view_id FROM album_views WHERE album_id = ? AND user_id IS NULL AND ip_address = ?',
+              [id, clientIp]
+            );
+          }
+
+          if (existingViews.length === 0) {
+            const connection = await pool.getConnection();
+            await connection.beginTransaction();
+            try {
+              await connection.query(
+                'UPDATE albums SET view_count = view_count + 1 WHERE album_id = ? AND is_deleted = FALSE',
+                [id]
+              );
+              await connection.query(
+                'INSERT INTO album_views (album_id, user_id, ip_address) VALUES (?, ?, ?)',
+                [id, userId, clientIp]
+              );
+              await connection.commit();
+            } catch (insertError) {
+              await connection.rollback();
+              if (insertError.code !== 'ER_DUP_ENTRY') {
+                console.error('[앨범 조회] 비동기 조회 기록 저장 오류:', insertError.message);
+              }
+            } finally {
+              connection.release();
+            }
+          }
+        } catch (bgError) {
+          console.error('[앨범 조회] 비동기 조회수 처리 오류:', bgError.message);
         }
       });
     } catch (error) {
@@ -573,12 +563,12 @@ router.post('/',
 
       const albumId = result.insertId;
 
-      // 사진 저장 (썸네일 URL 포함)
+      // [한글 코멘트] 사진 저장 시 R2 공개 CDN URL로 정규화하여 저장
       if (photos && photos.length > 0) {
         const photoValues = photos.map((photo, index) => [
           albumId,
-          photo.url, // 1080p 이미지 URL
-          photo.thumbnailUrl || null, // 썸네일 URL
+          photo.url ? toR2PublicUrl(photo.url) : photo.url,
+          photo.thumbnailUrl ? toR2PublicUrl(photo.thumbnailUrl) : null,
           index,
           photo.description || null
         ]);

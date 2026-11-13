@@ -1,8 +1,8 @@
 // 인증 및 권한 체크 미들웨어
 const jwt = require('jsonwebtoken');
 const { getPool } = require('../db');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'seomgim-church-secret-key-change-in-production';
+// [한글 코멘트] 보안 강화: 하드코딩된 기본 시크릿 문자열 제거 및 중앙 JWT 설정 모듈 참조
+const { JWT_SECRET } = require('../config/jwt');
 
 // JWT 토큰에서 사용자 정보 추출
 // EventSource는 헤더를 설정할 수 없으므로 쿼리 파라미터도 확인

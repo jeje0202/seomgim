@@ -47,9 +47,10 @@ export const compressTo1080p = async (file: File): Promise<File> => {
 
     const compressedFile = await imageCompression(file, fullImageOptions);
     
-    // 압축된 파일의 mimetype을 명시적으로 설정 (browser-image-compression이 제대로 설정하지 않을 수 있음)
+    // [한글 코멘트] JPEG로 변환된 파일의 확장자를 항상 .jpg로 일치시켜 R2 Content-Type과 확장자 불일치 방지
+    const baseName = (file.name || 'image').replace(/\.[^/.]+$/, '');
     const blob = compressedFile instanceof Blob ? compressedFile : new Blob([compressedFile], { type: 'image/jpeg' });
-    const finalFile = new File([blob], compressedFile.name || file.name.replace(/\.[^/.]+$/, '') + '.jpg', {
+    const finalFile = new File([blob], `${baseName}.jpg`, {
       type: 'image/jpeg',
       lastModified: Date.now()
     });
@@ -69,9 +70,10 @@ export const createThumbnail = async (file: File): Promise<File> => {
   try {
     const thumbnailFile = await imageCompression(file, thumbnailOptions);
     
-    // 압축된 파일의 mimetype을 명시적으로 설정
+    // [한글 코멘트] JPEG로 생성된 썸네일 파일명도 항상 .jpg 확장자로 통일
+    const baseName = (file.name || 'thumbnail').replace(/\.[^/.]+$/, '');
     const blob = thumbnailFile instanceof Blob ? thumbnailFile : new Blob([thumbnailFile], { type: 'image/jpeg' });
-    const finalFile = new File([blob], thumbnailFile.name || 'thumbnail.jpg', {
+    const finalFile = new File([blob], `thumb-${baseName}.jpg`, {
       type: 'image/jpeg',
       lastModified: Date.now()
     });

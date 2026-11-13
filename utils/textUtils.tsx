@@ -93,13 +93,13 @@ export const linkifyHTML = (html: string): string => {
     return placeholder;
   });
 
-  // 3. 텍스트에서 URL을 링크로 변환
+  // 3. 텍스트에서 URL을 링크로 변환 (보안 강화: 인라인 onclick 스크립트 속성 제거)
   processedHtml = processedHtml.replace(urlPattern, (url) => {
     let linkUrl = url;
     if (url.startsWith('www.')) {
       linkUrl = 'https://' + url;
     }
-    return `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" class="text-teal-600 hover:text-teal-700 underline break-all" onclick="event.stopPropagation();">${url}</a>`;
+    return `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" class="text-teal-600 hover:text-teal-700 underline break-all">${url}</a>`;
   });
 
   // 4. 태그 복원 (특수문자 처리를 위해 콜백 함수 사용)

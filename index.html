@@ -96,20 +96,10 @@
         text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
       }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
-    "react/": "https://aistudiocdn.com/react@^19.2.1/",
-    "react": "https://aistudiocdn.com/react@^19.2.1"
-  }
-}
-</script>
-<link rel="stylesheet" href="/index.css">
-<script type="module" src="/index.tsx"></script>
-</head>
+    <!-- [한글 코멘트] 불필요한 외부 CDN importmap 및 @google/genai 참조 제거 (Vite 로컬 번들링 사용) -->
+    <link rel="stylesheet" href="/index.css">
+    <script type="module" src="/index.tsx"></script>
+  </head>
   <body class="bg-slate-50 text-slate-800 antialiased">
     <div id="root"></div>
 </body>

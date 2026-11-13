@@ -37,6 +37,12 @@ export default defineConfig(({ mode }) => {
                 console.log('프록시 응답:', proxyRes.statusCode, req.url);
               });
             }
+          },
+          // [한글 코멘트] 레거시 /uploads 경로 요청 시 백엔드 R2 리다이렉트/정적 서빙으로 연결되도록 프록시 추가
+          '/uploads': {
+            target: 'http://localhost:5000',
+            changeOrigin: true,
+            secure: false
           }
         }
       },
@@ -63,6 +69,12 @@ export default defineConfig(({ mode }) => {
                 console.log('프록시 응답:', proxyRes.statusCode, req.url);
               });
             }
+          },
+          // [한글 코멘트] 프리뷰 모드에서도 레거시 /uploads 경로 프록시 지원
+          '/uploads': {
+            target: 'http://localhost:5000',
+            changeOrigin: true,
+            secure: false
           }
         }
       },

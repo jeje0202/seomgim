@@ -7,11 +7,8 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult, param, query } = require('express-validator');
 const { authenticate, authorize } = require('../middleware/auth');
 
-// JWT 시크릿 키 (환경 변수 또는 기본값)
-// [한글 코멘트] JWT 인증 토큰 서명 및 검증에 사용할 시크릿 키 정의 (누락 복구)
-const JWT_SECRET = process.env.JWT_SECRET || 'seomgim-church-secret-key-change-in-production';
-// [한글 코멘트] 로그인 세션 유지 시간: 기본 30일(1달)로 설정하여 장기 세션 유지 지원
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
+// [한글 코멘트] 보안 강화: 하드코딩된 시크릿 폴백을 제거하고 중앙 JWT 설정 모듈에서 시크릿 키와 만료 기간 참조
+const { JWT_SECRET, JWT_EXPIRES_IN } = require('../config/jwt');
 
 // ========== 회원가입 ==========
 router.post('/register',
@@ -575,7 +572,8 @@ router.get('/users',
       const params = [];
 
       if (search) {
-        query += ' AND (username LIKE ? OR name LIKE ? OR nickname LIKE ?)';
+        // [한글 코멘트] PostgreSQL 대소문자 무시 검색(ILIKE) 적용
+        query += ' AND (username ILIKE ? OR name ILIKE ? OR nickname ILIKE ?)';
         const searchPattern = `%${search}%`;
         params.push(searchPattern, searchPattern, searchPattern);
       }
@@ -589,7 +587,7 @@ router.get('/users',
       let countQuery = 'SELECT COUNT(*) as total FROM users WHERE 1=1';
       const countParams = [];
       if (search) {
-        countQuery += ' AND (username LIKE ? OR name LIKE ? OR nickname LIKE ?)';
+        countQuery += ' AND (username ILIKE ? OR name ILIKE ? OR nickname ILIKE ?)';
         const searchPattern = `%${search}%`;
         countParams.push(searchPattern, searchPattern, searchPattern);
       }

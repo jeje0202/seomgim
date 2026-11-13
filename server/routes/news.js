@@ -276,9 +276,9 @@ router.delete('/:id',
 
       const pool = getPool();
 
-      // 교회소식 존재 확인
+      // 교회소식 존재 확인 (첨부 이미지 URL 함께 조회)
       const [news] = await pool.query(
-        'SELECT news_id FROM church_news WHERE news_id = ? AND is_deleted = FALSE',
+        'SELECT news_id, image_url FROM church_news WHERE news_id = ? AND is_deleted = FALSE',
         [id]
       );
 
@@ -288,6 +288,25 @@ router.delete('/:id',
 
       // 교회소식 삭제 (soft delete)
       await pool.query('UPDATE church_news SET is_deleted = TRUE WHERE news_id = ?', [id]);
+
+      // [한글 코멘트] 교회소식 삭제 시 첨부된 R2 이미지 객체도 함께 정리
+      if (news[0].image_url) {
+        try {
+          const { deleteFromR2 } = require('../utils/r2Storage');
+          let imageUrls = [];
+          try {
+            const parsed = JSON.parse(news[0].image_url);
+            imageUrls = Array.isArray(parsed) ? parsed : [news[0].image_url];
+          } catch (e) {
+            imageUrls = [news[0].image_url];
+          }
+          imageUrls.filter(Boolean).forEach((imgUrl) => {
+            deleteFromR2(imgUrl).catch((err) => console.error('[교회소식 삭제] R2 이미지 삭제 오류:', err));
+          });
+        } catch (r2Err) {
+          console.error('[교회소식 삭제] 이미지 정리 오류:', r2Err);
+        }
+      }
 
       res.json({ success: true, message: '교회소식이 삭제되었습니다.' });
     } catch (error) {

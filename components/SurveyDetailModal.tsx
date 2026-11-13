@@ -6,7 +6,8 @@ import { getSurveyDetail, submitSurveyResponse, SurveyDetail, SurveyQuestion } f
 import { getUserInfo } from '../services/authApi';
 import AlertModal from './AlertModal';
 import { useModalBackButton } from '../hooks/useModalBackButton';
-import { linkifyHTML } from '../utils/textUtils';
+// [한글 코멘트] 보안 강화: 설문 설명 HTML 렌더링 시 XSS 방지를 위한 살균 유틸리티 임포트
+import { sanitizeAndLinkifyHtml } from '../utils/sanitizeHtml';
 
 interface SurveyDetailModalProps {
   isOpen: boolean;
@@ -203,11 +204,11 @@ const SurveyDetailModal: React.FC<SurveyDetailModalProps> = ({
         ) : survey ? (
           <>
             <h2 className="text-2xl font-bold text-slate-800 mb-3 pr-16 leading-snug">{survey.title}</h2>
-            {/* [한글 코멘트] 사용자 요청: 설문조사 본문 글자 색상, 굵기, 기울임체 등 서식 스타일 보존 및 하이퍼링크 자동 변환 */}
+            {/* [한글 코멘트] 보안 강화: 서식 스타일은 유지하면서 악성 스크립트를 제거하는 sanitizeAndLinkifyHtml 적용 */}
             {survey.description && (
               <div 
                 className="text-slate-700 mb-6 whitespace-pre-wrap leading-relaxed text-sm md:text-base bg-slate-50/70 p-4 rounded-xl border border-slate-100"
-                dangerouslySetInnerHTML={{ __html: linkifyHTML(survey.description) }}
+                dangerouslySetInnerHTML={{ __html: sanitizeAndLinkifyHtml(survey.description) }}
               />
             )}
 

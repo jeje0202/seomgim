@@ -51,14 +51,13 @@ const processBase64Images = async (htmlContent) => {
         }
       }
 
-      // [한글 코멘트] 로컬 디스크 파일 쓰기를 하지 않고 Cloudflare R2 스토리지로 전용 업로드
+      // [한글 코멘트] 로컬 디스크 파일 쓰기를 하지 않고 Cloudflare R2 스토리지로 전용 업로드 후 공개 CDN URL로 치환
       const { uploadToR2 } = require('../utils/r2Storage');
       const r2Key = `uploads/board/pasted/${fileName}`;
       const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-      await uploadToR2(buffer, r2Key, mimeType);
+      const uploadResult = await uploadToR2(buffer, r2Key, mimeType);
 
-      const fileUrl = `/uploads/board/pasted/${fileName}`;
-      processedContent = processedContent.replace(fullDataUri, fileUrl);
+      processedContent = processedContent.replace(fullDataUri, uploadResult.url);
     } catch (err) {
       console.error('❌ Base64 붙여넣기 이미지 처리 중 오류 발생:', err);
     }
@@ -330,10 +329,10 @@ router.get('/posts',
         params.push(category_id);
       }
 
-      // [한글 코멘트] 게시글 제목, 본문 내용, 작성자 이름 검색 조건 추가
+      // [한글 코멘트] 게시글 제목, 본문 내용, 작성자 이름 검색 조건 추가 (PostgreSQL 대소문자 무시 검색 ILIKE 적용)
       if (search && typeof search === 'string' && search.trim() !== '') {
         const keyword = `%${search.trim()}%`;
-        query += ' AND (p.title LIKE ? OR p.content LIKE ? OR p.author_name LIKE ?)';
+        query += ' AND (p.title ILIKE ? OR p.content ILIKE ? OR p.author_name ILIKE ?)';
         params.push(keyword, keyword, keyword);
       }
 
@@ -416,10 +415,10 @@ router.get('/posts',
         countParams.push(category_id);
       }
 
-      // [한글 코멘트] 전체 건수 계산 시에도 검색 파라미터 조건 동일 적용
+      // [한글 코멘트] 전체 건수 계산 시에도 검색 파라미터 조건 동일 적용 (PostgreSQL ILIKE)
       if (search && typeof search === 'string' && search.trim() !== '') {
         const keyword = `%${search.trim()}%`;
-        countQuery += ' AND (p.title LIKE ? OR p.content LIKE ? OR p.author_name LIKE ?)';
+        countQuery += ' AND (p.title ILIKE ? OR p.content ILIKE ? OR p.author_name ILIKE ?)';
         countParams.push(keyword, keyword, keyword);
       }
 

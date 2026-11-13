@@ -54,23 +54,23 @@ const updateDatabaseUrlsToR2 = async () => {
     console.error('❌ MariaDB album_photos 업데이트 에러:', err.message);
   }
 
-  // 3. MariaDB news (image_url & content)
+  // 3. MariaDB church_news (image_url & content) - [한글 코멘트] 기존 news 테이블명 오타를 실제 테이블명 church_news로 수정
   try {
     const [resNewsImg] = await pool.query(`
-      UPDATE news 
+      UPDATE church_news 
       SET image_url = REPLACE(image_url, '/uploads/', ?)
       WHERE image_url LIKE '%/uploads/%'
     `, [R2_BASE_URL]);
-    console.log(`✅ MariaDB news image_url 업데이트 완료: ${resNewsImg.affectedRows}건`);
+    console.log(`✅ MariaDB church_news image_url 업데이트 완료: ${resNewsImg.affectedRows}건`);
 
     const [resNewsContent] = await pool.query(`
-      UPDATE news 
+      UPDATE church_news 
       SET content = REPLACE(content, '/uploads/', ?)
       WHERE content LIKE '%/uploads/%'
     `, [R2_BASE_URL]);
-    console.log(`✅ MariaDB news content 업데이트 완료: ${resNewsContent.affectedRows}건`);
+    console.log(`✅ MariaDB church_news content 업데이트 완료: ${resNewsContent.affectedRows}건`);
   } catch (err) {
-    // news 테이블 없을 시 무시
+    console.error('❌ MariaDB church_news 업데이트 에러:', err.message);
   }
 
   // 4. SQLite cms_content.db (cms_sections & cms_section_history)

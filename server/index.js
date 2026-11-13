@@ -97,12 +97,20 @@ if (fs.existsSync(dataDir)) {
 }
 console.log('✅ Cloudflare R2 스토리지 활성화 (신규 업로드 파일 디스크 저장 전면 차단 완료)');
 
-// [한글 코멘트] R2 클라우드 폴백 미들웨어: 로컬 디스크에 파일이 없거나 향후 로컬 파일 삭제 후에도 Cloudflare R2에서 즉시 내려 받아 서빙
-const { getObjectFromR2, getMimeType } = require('./utils/r2Storage');
+// [한글 코멘트] R2 클라우드 고속 리다이렉트 및 폴백 미들웨어:
+// 로컬 디스크에 없는 /uploads/* 요청은 백엔드 메모리 중계 병목 없이 Cloudflare R2 CDN 공개 URL로 즉시 301 리다이렉트 처리
+const { getObjectFromR2, getMimeType, toR2PublicUrl, publicUrl } = require('./utils/r2Storage');
 app.use('/uploads/*', async (req, res, next) => {
   try {
     const relativePath = req.params[0];
     if (relativePath) {
+      if (publicUrl) {
+        const cdnTargetUrl = toR2PublicUrl(`uploads/${relativePath}`);
+        if (cdnTargetUrl && cdnTargetUrl.startsWith('http')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          return res.redirect(301, cdnTargetUrl);
+        }
+      }
       const r2Key = `uploads/${relativePath}`;
       const buffer = await getObjectFromR2(r2Key);
       if (buffer) {
